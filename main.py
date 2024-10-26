@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI, WebSocket
 from astroquery.simbad import Simbad
 from astroquery.jplhorizons import Horizons
