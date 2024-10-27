@@ -63,13 +63,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 }
                 cst.append(new_cst)
 
-            server_data = {
+            server_data = json.dumps({
                 'location': received_data['location'],
                 'time': Time.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'constellations': cst
-            }
+            }, ensure_ascii=False)
 
-            await websocket.send_text(json.dumps(server_data, ensure_ascii=False))
+            print(server_data)
+            await websocket.send_text(server_data)
 
             # n초마다 데이터를 보냄
             await asyncio.sleep(120)
