@@ -74,9 +74,9 @@ async def websocket_endpoint(websocket: WebSocket):
         data = await websocket.receive_text()
         print('Received data: ', data)
         received_data = json.loads(data)
-        
+
         while True:
-            processing_task = asyncio.create_task(process_data(parsed_data, received_data, request_id))
+            #processing_task = asyncio.create_task(process_data(parsed_data, received_data, request_id))
 
             async def ping_task():
                 while True:
@@ -85,8 +85,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
             asyncio.create_task(ping_task())
 
-            result = await processing_task
-            await websocket.send_text(json.dumps(result, ensure_ascii=False))
+            #result = await processing_task
+            #await websocket.send_text(json.dumps(result, ensure_ascii=False))
 
     except WebSocketDisconnect:
         print('Client Disconnected')
