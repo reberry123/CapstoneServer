@@ -75,9 +75,9 @@ async def websocket_endpoint(websocket: WebSocket):
         received_data = json.loads(data)
         
         while True:
-            result = await process_data(parsed_data, received_data)
-            await websocket.send_text("Test Data")
-            await asyncio.sleep(60)
+            # result = await process_data(parsed_data, received_data)
+            await websocket.send_text("Test data")
+            await asyncio.sleep(5)
 
     except Exception as e:
         print(f'Connection error: {e}')
