@@ -70,7 +70,7 @@ async def websocket_endpoint(websocket: WebSocket):
             }, ensure_ascii=False)
 
             print(server_data)
-            await websocket.send_text(server_data)
+            await websocket.send_text("Test Data")
 
             # n초마다 데이터를 보냄
             await asyncio.sleep(120)
