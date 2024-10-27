@@ -6,7 +6,11 @@ from astropy.time import Time
 import astropy.units as u
 import asyncio
 import json
+import warnings
 import numpy as np
+
+# 경고 무시
+warnings.filterwarnings('ignore', message='ERFA function "pmsafe" yielded')
 
 # 예시 데이터 2
 planets = [
@@ -39,6 +43,7 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         # 별자리 데이터 파싱
         parsed_data = parse_constellations_data()
+
         
         # Unity로부터 GPS정보 받아오기
         data = await websocket.receive_text()
@@ -68,7 +73,7 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.send_text(json.dumps(server_data))
 
             # n초마다 데이터를 보냄
-            await asyncio.sleep(60)
+            await asyncio.sleep(120)
     except Exception as e:
         print(f'Connection error: {e}')
 
@@ -88,7 +93,7 @@ def get_star_datas(star_names, obs_loc):
 
     for star_name, ra, dec, pm_ra_cosdec, pm_dec, parallax, radial_velocity, flux_v in zip(result_table['MAIN_ID'], result_table['RA'], result_table['DEC'], result_table['PMRA'], result_table['PMDEC'], result_table['PLX_VALUE'], result_table['RV_VALUE'], result_table['FLUX_V']):
 
-    # SkyCoord 객체로 변환
+        # SkyCoord 객체로 변환
         star_coord = SkyCoord(
             ra=ra,
             dec=dec,
@@ -209,3 +214,19 @@ def parse_constellations_data():
     with open('constellation.json', 'r', encoding="UTF8") as f:
         data = json.load(f)
     return data
+
+if __name__ == "__main__":
+    parsed_data = parse_constellations_data()
+    location = (37.5665, 126.9780)
+
+    cst = []
+    for obj in parsed_data:
+        cst_name = obj['name']
+        cst_data = get_star_datas(obj['stars'], location)
+        cst_line = obj['lines']
+        new_cst = {
+            'name': cst_name,
+            'stars': cst_data,
+            'lines': cst_line
+        }
+        cst.append(new_cst)
