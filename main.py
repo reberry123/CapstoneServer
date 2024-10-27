@@ -34,7 +34,6 @@ planets = [
 ]
 
 app = FastAPI()
-results = {}
 
 async def process_data(parsed_data, received_data, request_id: str):
     cst = []
@@ -58,7 +57,8 @@ async def process_data(parsed_data, received_data, request_id: str):
     }
 
     await asyncio.sleep(150)
-    results[request_id] = server_data
+
+    return server_data
 
 # WebSocket 엔드포인트
 @app.websocket("/ws")
@@ -75,29 +75,19 @@ async def websocket_endpoint(websocket: WebSocket):
         print('Received data: ', data)
         received_data = json.loads(data)
 
-        asyncio.create_task(process_data(parsed_data, received_data, request_id))
-                
+        processing_task = asyncio.create_task(process_data(parsed_data, received_data, request_id))
         await websocket.send_text(f'Processing started. Request ID: {request_id}')
 
         while True:
-            await asyncio.sleep(10)
-            if request_id in results:
-                await websocket.send_text(json.dumps(results[request_id], ensure_ascii=False))
-                del results[request_id]
-                break
-        # while True:
-        #     await asyncio.sleep(10)
-            # while True:
-            #     asyncio.create_task(process_data(parsed_data, received_data, request_id))
-                
-            #     await websocket.send_text(f'Processing started. Request ID: {request_id}')
+            async def ping_task():
+                while True:
+                    await asyncio.sleep(30)
+                    await websocket.send_text('ping')
 
-            #     while True:
-            #         await asyncio.sleep(10)
-            #         if request_id in results:
-            #             await websocket.send_text(json.dumps(results[request_id], ensure_ascii=False))
-            #             del results[request_id]
-            #             break
+            asyncio.create_task(ping_task())
+
+            result = await processing_task
+            await websocket.send_text(json.dumps(result, ensure_ascii=False))
 
     except WebSocketDisconnect:
         print('Client Disconnected')
