@@ -44,9 +44,9 @@ async def websocket_endpoint(websocket: WebSocket):
         # 별자리 데이터 파싱
         parsed_data = parse_constellations_data()
 
-        
         # Unity로부터 GPS정보 받아오기
         data = await websocket.receive_text()
+        print('Received data: ', data)
         received_data = json.loads(data)
         location = (received_data['location'][0], received_data['location'][1])
         
@@ -69,8 +69,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 'constellations': cst
             }
 
-            # print(new_data)
-            await websocket.send_text(json.dumps(server_data))
+            await websocket.send_text(json.dumps(server_data, ensure_ascii=False))
 
             # n초마다 데이터를 보냄
             await asyncio.sleep(120)
