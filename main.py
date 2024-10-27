@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks 
 from astroquery.simbad import Simbad
 from astroquery.jplhorizons import Horizons
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz
@@ -34,8 +34,9 @@ planets = [
 ]
 
 app = FastAPI()
+results = {}
 
-async def process_data(parsed_data, received_data):
+async def process_data(parsed_data, received_data, request_id: str):
     cst = []
     location = (received_data['location'][0], received_data['location'][1])
 
@@ -50,20 +51,20 @@ async def process_data(parsed_data, received_data):
         }
         cst.append(new_cst)
 
-    server_data = json.dumps({
+    server_data = {
         'location': received_data['location'],
         'time': Time.now().strftime('%Y-%m-%d %H:%M:%S'),
         'constellations': cst
-    }, ensure_ascii=False)
+    }
 
     await asyncio.sleep(120)
-
-    return server_data
+    results[request_id] = server_data
 
 # WebSocket 엔드포인트
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    request_id = 'OplGYoZ9'
 
     try:
         # 별자리 데이터 파싱
@@ -75,9 +76,19 @@ async def websocket_endpoint(websocket: WebSocket):
         received_data = json.loads(data)
         
         while True:
-            # result = await process_data(parsed_data, received_data)
-            await websocket.send_text("Test data")
-            await asyncio.sleep(5)
+            asyncio.create_task(process_data(parsed_data, received_data, request_id))
+            
+            await websocket.send_text(f'Processing started. Request ID: {request_id}')
+
+            while True:
+                await asyncio.sleep(10)
+                if request_id in results:
+                    await websocket.send_text(json.dumps(results[request_id], ensure_ascii=False))
+                    del results[request_id]
+                    break
+
+    except WebSocketDisconnect:
+        print('Client Disconnected')
 
     except Exception as e:
         print(f'Connection error: {e}')
