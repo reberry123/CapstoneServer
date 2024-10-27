@@ -57,7 +57,7 @@ async def process_data(parsed_data, received_data, request_id: str):
         'constellations': cst
     }
 
-    await asyncio.sleep(120)
+    await asyncio.sleep(150)
     results[request_id] = server_data
 
 # WebSocket 엔드포인트
@@ -74,20 +74,30 @@ async def websocket_endpoint(websocket: WebSocket):
         data = await websocket.receive_text()
         print('Received data: ', data)
         received_data = json.loads(data)
-        while True:
-            await websocket.send_text(json.dumps(parsed_data, ensure_ascii=False))
-            await asyncio.sleep(10)
-        # while True:
-        #     asyncio.create_task(process_data(parsed_data, received_data, request_id))
-            
-        #     await websocket.send_text(f'Processing started. Request ID: {request_id}')
 
-        #     while True:
-        #         await asyncio.sleep(10)
-        #         if request_id in results:
-        #             await websocket.send_text(json.dumps(results[request_id], ensure_ascii=False))
-        #             del results[request_id]
-        #             break
+        asyncio.create_task(process_data(parsed_data, received_data, request_id))
+                
+        await websocket.send_text(f'Processing started. Request ID: {request_id}')
+
+        while True:
+            await asyncio.sleep(10)
+            if request_id in results:
+                await websocket.send_text(json.dumps(results[request_id], ensure_ascii=False))
+                del results[request_id]
+                break
+        # while True:
+        #     await asyncio.sleep(10)
+            # while True:
+            #     asyncio.create_task(process_data(parsed_data, received_data, request_id))
+                
+            #     await websocket.send_text(f'Processing started. Request ID: {request_id}')
+
+            #     while True:
+            #         await asyncio.sleep(10)
+            #         if request_id in results:
+            #             await websocket.send_text(json.dumps(results[request_id], ensure_ascii=False))
+            #             del results[request_id]
+            #             break
 
     except WebSocketDisconnect:
         print('Client Disconnected')
