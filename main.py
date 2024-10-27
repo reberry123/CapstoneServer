@@ -76,6 +76,8 @@ async def websocket_endpoint(websocket: WebSocket):
         received_data = json.loads(data)
 
         while True:
+            await asyncio.sleep(30)
+            await websocket.send_text('ping')
             #processing_task = asyncio.create_task(process_data(parsed_data, received_data, request_id))
 
             async def ping_task():
@@ -83,7 +85,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     await asyncio.sleep(30)
                     await websocket.send_text('ping')
 
-            asyncio.create_task(ping_task())
+            #asyncio.create_task(ping_task())
 
             #result = await processing_task
             #await websocket.send_text(json.dumps(result, ensure_ascii=False))
