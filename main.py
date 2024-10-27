@@ -35,6 +35,31 @@ planets = [
 
 app = FastAPI()
 
+async def process_data(parsed_data, received_data):
+    cst = []
+    location = (received_data['location'][0], received_data['location'][1])
+
+    for obj in parsed_data:
+        cst_name = obj['name']
+        cst_data = get_star_datas(obj['stars'], location)
+        cst_line = obj['lines']
+        new_cst = {
+            'name': cst_name,
+            'stars': cst_data,
+            'lines': cst_line
+        }
+        cst.append(new_cst)
+
+    server_data = json.dumps({
+        'location': received_data['location'],
+        'time': Time.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'constellations': cst
+    }, ensure_ascii=False)
+
+    await asyncio.sleep(120)
+
+    return server_data
+
 # WebSocket 엔드포인트
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -48,32 +73,12 @@ async def websocket_endpoint(websocket: WebSocket):
         data = await websocket.receive_text()
         print('Received data: ', data)
         received_data = json.loads(data)
-        location = (received_data['location'][0], received_data['location'][1])
         
         while True:
-            cst = []
-            for obj in parsed_data:
-                cst_name = obj['name']
-                cst_data = get_star_datas(obj['stars'], location)
-                cst_line = obj['lines']
-                new_cst = {
-                    'name': cst_name,
-                    'stars': cst_data,
-                    'lines': cst_line
-                }
-                cst.append(new_cst)
-
-            server_data = json.dumps({
-                'location': received_data['location'],
-                'time': Time.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'constellations': cst
-            }, ensure_ascii=False)
-
-            print(server_data)
+            result = await process_data(parsed_data, received_data)
             await websocket.send_text("Test Data")
+            await asyncio.sleep(60)
 
-            # n초마다 데이터를 보냄
-            await asyncio.sleep(120)
     except Exception as e:
         print(f'Connection error: {e}')
 
