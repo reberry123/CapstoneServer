@@ -98,13 +98,13 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
 
     try:
+        data = await websocket.receive_text()
+        print('Received data: ', data)
+        new_location = json.loads(data)
+        location.update(new_location["location"])
+        print(location)
+        
         while True:
-            data = await websocket.receive_text()
-            print('Received data: ', data)
-            new_location = json.loads(data)
-            location.update(new_location["location"])
-            print(location)
-
             await websocket.send_text(json.dumps(result, ensure_ascii=False))
             await asyncio.sleep(60)
 
