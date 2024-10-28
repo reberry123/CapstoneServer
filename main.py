@@ -42,7 +42,7 @@ location = {
     "lon": 126.9780
 }
 
-result = []
+result = [{},{},{},{},{},{}]
 
 async def process_data(parsed_data, location):
     global result
@@ -67,7 +67,7 @@ async def process_data(parsed_data, location):
                 'time': Time.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'constellations': cst
             }
-            
+
             result[i] = server_data
             cst.clear()
             i += 1
