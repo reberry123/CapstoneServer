@@ -76,7 +76,7 @@ async def process_data(parsed_data, location):
     }
     result.append(server_data)
     print('Complete!')
-    await asyncio.sleep(60)
+    await asyncio.sleep(30)
     return server_data
 
 @asynccontextmanager
@@ -84,8 +84,7 @@ async def lifespan(app: FastAPI):
     parsed_data = parse_constellations_data()
 
     async def update_data():
-        global result
-        result = await process_data(parsed_data, location)
+        await process_data(parsed_data, location)
         print("Updated!")
 
     task = asyncio.create_task(
@@ -115,7 +114,7 @@ async def websocket_endpoint(websocket: WebSocket):
             print(len(result))
             for item in result:
                 await websocket.send_text(json.dumps(item, ensure_ascii=False))
-                await asyncio.sleep(30)
+                await asyncio.sleep(10)
 
     except WebSocketDisconnect:
         print('Client Disconnected')
