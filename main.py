@@ -42,11 +42,11 @@ location = {
     "lon": 126.9780
 }
 
-result = {}
+result = []
 
 async def process_data(parsed_data, location):
+    global result
     cst = []
-    i = 0
 
     for obj in parsed_data:
         cst_name = obj['name']
@@ -58,18 +58,25 @@ async def process_data(parsed_data, location):
             'lines': cst_line
         }
         cst.append(new_cst)
-        i += 1
-        print(f'{i}/88 Updated')
+        print(f'{len(cst)}/88 Updated')
 
-    print('Complete!')
+        if len(cst) >= 15:
+            server_data = {
+                'location': location,
+                'time': Time.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'constellations': cst
+            }
+
+            result.append(server_data)
+            cst.clear()
     server_data = {
         'location': location,
         'time': Time.now().strftime('%Y-%m-%d %H:%M:%S'),
         'constellations': cst
     }
-
-    await asyncio.sleep(90)
-
+    result.append(server_data)
+    print('Complete!')
+    await asyncio.sleep(60)
     return server_data
 
 @asynccontextmanager
@@ -103,10 +110,28 @@ async def websocket_endpoint(websocket: WebSocket):
         new_location = json.loads(data)
         location.update(new_location["location"])
         print(location)
-        
+
         while True:
-            await websocket.send_text(json.dumps(result, ensure_ascii=False))
-            await asyncio.sleep(60)
+            await websocket.send_text(json.dumps(result[0], ensure_ascii=False))
+            await asyncio.sleep(30)
+
+            await websocket.send_text(json.dumps(result[1], ensure_ascii=False))
+            await asyncio.sleep(30)
+
+            await websocket.send_text(json.dumps(result[2], ensure_ascii=False))
+            await asyncio.sleep(30)
+
+            await websocket.send_text(json.dumps(result[3], ensure_ascii=False))
+            await asyncio.sleep(30)
+
+            await websocket.send_text(json.dumps(result[4], ensure_ascii=False))
+            await asyncio.sleep(30)
+
+            await websocket.send_text(json.dumps(result[5], ensure_ascii=False))
+            await asyncio.sleep(30)
+
+            await websocket.send_text(json.dumps(result[6], ensure_ascii=False))
+            await asyncio.sleep(30)
 
     except WebSocketDisconnect:
         print('Client Disconnected')
