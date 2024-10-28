@@ -112,26 +112,10 @@ async def websocket_endpoint(websocket: WebSocket):
         print(location)
 
         while True:
-            await websocket.send_text(json.dumps(result[0], ensure_ascii=False))
-            await asyncio.sleep(30)
-
-            await websocket.send_text(json.dumps(result[1], ensure_ascii=False))
-            await asyncio.sleep(30)
-
-            await websocket.send_text(json.dumps(result[2], ensure_ascii=False))
-            await asyncio.sleep(30)
-
-            await websocket.send_text(json.dumps(result[3], ensure_ascii=False))
-            await asyncio.sleep(30)
-
-            await websocket.send_text(json.dumps(result[4], ensure_ascii=False))
-            await asyncio.sleep(30)
-
-            await websocket.send_text(json.dumps(result[5], ensure_ascii=False))
-            await asyncio.sleep(30)
-
-            await websocket.send_text(json.dumps(result[6], ensure_ascii=False))
-            await asyncio.sleep(30)
+            print(len(result))
+            for item in result:
+                await websocket.send_text(json.dumps(item, ensure_ascii=False))
+                await asyncio.sleep(30)
 
     except WebSocketDisconnect:
         print('Client Disconnected')
