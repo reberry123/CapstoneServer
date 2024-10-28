@@ -47,6 +47,7 @@ result = []
 async def process_data(parsed_data, location):
     global result
     cst = []
+    i = 0
 
     for obj in parsed_data:
         cst_name = obj['name']
@@ -66,15 +67,18 @@ async def process_data(parsed_data, location):
                 'time': Time.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'constellations': cst
             }
-
-            result.append(server_data)
+            
+            result[i] = server_data
             cst.clear()
+            i += 1
+
     server_data = {
         'location': location,
         'time': Time.now().strftime('%Y-%m-%d %H:%M:%S'),
         'constellations': cst
     }
-    result.append(server_data)
+
+    result[i] = server_data
     print('Complete!')
     await asyncio.sleep(30)
     return server_data
@@ -113,8 +117,9 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             print(len(result))
             for item in result:
+                print(len(item["constellations"]))
                 await websocket.send_text(json.dumps(item, ensure_ascii=False))
-                await asyncio.sleep(10)
+                await asyncio.sleep(30)
 
     except WebSocketDisconnect:
         print('Client Disconnected')
