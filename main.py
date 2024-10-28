@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi_utils.tasks import repeat_every
 from astroquery.simbad import Simbad
 from astroquery.jplhorizons import Horizons
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz
@@ -41,8 +42,11 @@ location = {
     "lon": 126.9780
 }
 
+result = {}
+
 async def process_data(parsed_data, location):
     cst = []
+    i = 0
 
     for obj in parsed_data:
         cst_name = obj['name']
@@ -54,29 +58,32 @@ async def process_data(parsed_data, location):
             'lines': cst_line
         }
         cst.append(new_cst)
+        i += 1
+        print(f'{i}/88 Updated')
 
+    print('Complete!')
     server_data = {
         'location': location,
         'time': Time.now().strftime('%Y-%m-%d %H:%M:%S'),
         'constellations': cst
     }
 
-    await asyncio.sleep(120)
+    await asyncio.sleep(90)
 
     return server_data
 
-async def update_data(parsed_data):
-    global result, location
-    while True:
-        result = await process_data(parsed_data, location)
-        await asyncio.sleep(5)
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global result
-    result = {}
     parsed_data = parse_constellations_data()
-    task = asyncio.create_task(update_data(parsed_data))
+
+    async def update_data():
+        global result
+        result = await process_data(parsed_data, location)
+        print("Updated!")
+
+    task = asyncio.create_task(
+        repeat_every(seconds=30)(update_data)()
+    )
 
     yield
 
@@ -95,7 +102,7 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             print('Received data: ', data)
             new_location = json.loads(data)
-            location.update(new_location)
+            location.update(new_location["location"])
 
             await websocket.send_text(json.dumps(result, ensure_ascii=False))
             await asyncio.sleep(60)
@@ -245,17 +252,5 @@ def parse_constellations_data():
     return data
 
 if __name__ == "__main__":
-    parsed_data = parse_constellations_data()
-    location = (37.5665, 126.9780)
-
-    cst = []
-    for obj in parsed_data:
-        cst_name = obj['name']
-        cst_data = get_star_datas(obj['stars'], location)
-        cst_line = obj['lines']
-        new_cst = {
-            'name': cst_name,
-            'stars': cst_data,
-            'lines': cst_line
-        }
-        cst.append(new_cst)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
