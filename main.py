@@ -1,4 +1,5 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks 
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from astroquery.simbad import Simbad
 from astroquery.jplhorizons import Horizons
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz
@@ -35,9 +36,13 @@ planets = [
 
 app = FastAPI()
 
-async def process_data(parsed_data, received_data, request_id: str):
+location = {
+    "lat": 37.5665,
+    "lon": 126.9780
+}
+
+async def process_data(parsed_data, location):
     cst = []
-    location = (received_data['location'][0], received_data['location'][1])
 
     for obj in parsed_data:
         cst_name = obj['name']
@@ -51,44 +56,49 @@ async def process_data(parsed_data, received_data, request_id: str):
         cst.append(new_cst)
 
     server_data = {
-        'location': received_data['location'],
+        'location': location,
         'time': Time.now().strftime('%Y-%m-%d %H:%M:%S'),
         'constellations': cst
     }
 
-    await asyncio.sleep(150)
+    await asyncio.sleep(120)
 
     return server_data
+
+async def update_data(parsed_data):
+    global result, location
+    while True:
+        result = await process_data(parsed_data, location)
+        await asyncio.sleep(5)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global result
+    result = {}
+    parsed_data = parse_constellations_data()
+    task = asyncio.create_task(update_data(parsed_data))
+
+    yield
+
+    task.cancel()
+
+app.router.lifespan_context = lifespan
 
 # WebSocket 엔드포인트
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    global location
     await websocket.accept()
-    request_id = 'OplGYoZ9'
 
     try:
-        # 별자리 데이터 파싱
-        parsed_data = parse_constellations_data()
-
-        # Unity로부터 GPS정보 받아오기
-        data = await websocket.receive_text()
-        print('Received data: ', data)
-        received_data = json.loads(data)
-
         while True:
-            await asyncio.sleep(30)
-            await websocket.send_text('ping')
-            #processing_task = asyncio.create_task(process_data(parsed_data, received_data, request_id))
+            data = await websocket.receive_text()
+            print('Received data: ', data)
+            new_location = json.loads(data)
+            location.update(new_location)
 
-            async def ping_task():
-                while True:
-                    await asyncio.sleep(30)
-                    await websocket.send_text('ping')
-
-            #asyncio.create_task(ping_task())
-
-            #result = await processing_task
-            #await websocket.send_text(json.dumps(result, ensure_ascii=False))
+            await websocket.send_text(json.dumps(result, ensure_ascii=False))
+            await asyncio.sleep(60)
 
     except WebSocketDisconnect:
         print('Client Disconnected')
@@ -105,7 +115,7 @@ def get_star_datas(star_names, obs_loc):
     simbad = Simbad()
     simbad.add_votable_fields('flux(V)', 'pmra', 'pmdec', 'plx', 'rv_value')
     result_table = simbad.query_objects(star_names)
-    obs_location = EarthLocation(lat=obs_loc[0] * u.deg, lon=obs_loc[1] * u.deg, height=0 * u.m)
+    obs_location = EarthLocation(lat=obs_loc["lat"] * u.deg, lon=obs_loc["lon"] * u.deg, height=0 * u.m)
     obs_time = Time.now()
     star_datas = []
     i = 0
