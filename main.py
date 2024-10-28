@@ -103,6 +103,7 @@ async def websocket_endpoint(websocket: WebSocket):
             print('Received data: ', data)
             new_location = json.loads(data)
             location.update(new_location["location"])
+            print(location)
 
             await websocket.send_text(json.dumps(result, ensure_ascii=False))
             await asyncio.sleep(60)
@@ -247,7 +248,7 @@ def get_planet_data(planet_id, obs_loc):
 
 # 별자리 데이터 파싱
 def parse_constellations_data():
-    with open('constellation.json', 'r', encoding="UTF8") as f:
+    with open('test.json', 'r', encoding="UTF8") as f:
         data = json.load(f)
     return data
 
