@@ -14,11 +14,12 @@ import asyncio
 import json
 import time
 import warnings
+import threading
 import numpy as np
 
 # 경고 무시
 warnings.filterwarnings('ignore', message='ERFA function "pmsafe" yielded')
-
+lock = threading.Lock()
 Simbad.TIMEOUT = 120
 
 # 예시 데이터 2
@@ -198,8 +199,9 @@ async def lifespan(app: FastAPI):
 
     async def update_data():
         try:
-            await process_data(parsed_data, global_state.location)
-            print("Data updated successfully!")
+            with lock:
+                await process_data(parsed_data, global_state.location)
+                print("Data updated successfully!")
         except Exception as e:
             print(f"Error updating data: {e}")
 
@@ -245,20 +247,10 @@ async def websocket_endpoint(websocket: WebSocket):
         global_state.location = new_location
         print(f"Updated location: {global_state.location}")
 
-        for item in global_state.result:
-            if item:  # Only send non-empty results
-                try:
-                    await websocket.send_text(json.dumps(item, ensure_ascii=False))
-                    print(f"Sent constellation batch with {len(item.get('constellations', []))} constellations")
-                except Exception as e:
-                    print(f"Error sending data: {e}")
-                    raise
-            await asyncio.sleep(1)
-
-        # Main WebSocket loop
-        while True:
+        #초기 데이터 전송
+        with lock:
             for item in global_state.result:
-                if item:  # Only send non-empty results
+                if item:
                     try:
                         await websocket.send_text(json.dumps(item, ensure_ascii=False))
                         print(f"Sent constellation batch with {len(item.get('constellations', []))} constellations")
@@ -266,7 +258,20 @@ async def websocket_endpoint(websocket: WebSocket):
                         print(f"Error sending data: {e}")
                         raise
                 await asyncio.sleep(1)
-            await asyncio.sleep(60)
+
+        # 메인 웹소켓 루프
+        while True:
+            with lock:
+                await asyncio.sleep(180)
+                for item in global_state.result:
+                    if item:
+                        try:
+                            await websocket.send_text(json.dumps(item, ensure_ascii=False))
+                            print(f"Sent constellation batch with {len(item.get('constellations', []))} constellations")
+                        except Exception as e:
+                            print(f"Error sending data: {e}")
+                            raise
+                    await asyncio.sleep(1)
 
     except WebSocketDisconnect:
         print('Client disconnected')
