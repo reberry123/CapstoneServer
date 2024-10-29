@@ -154,7 +154,7 @@ async def process_data(parsed_data: List[Dict], location: Location):
                 'lines': cst_line
             }
             cst.append(new_cst)
-            print(f'{len(cst)}/88 Updated')
+            print(f'{global_state.batch_index * 15 + global_state.data_index}/88 Updated')
 
             if len(cst) >= 15:
                 server_data = {
@@ -166,6 +166,8 @@ async def process_data(parsed_data: List[Dict], location: Location):
                 global_state.batch_index += 1
                 if global_state.batch_index >= len(global_state.result):
                     global_state.batch_index = 0
+
+                break
 
         global_state.data_index += 15
         if global_state.data_index >= len(parsed_data):
