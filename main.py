@@ -167,9 +167,9 @@ async def process_data(parsed_data: List[Dict], location: Location):
                 if global_state.batch_index >= len(global_state.result):
                     global_state.batch_index = 0
 
-        global_state.index += 15
-        if global_state.index >= len(parsed_data):
-            global_state.index = 0
+        global_state.data_index += 15
+        if global_state.data_index >= len(parsed_data):
+            global_state.data_index = 0
         print('Complete!')
         
     except Exception as e:
