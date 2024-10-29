@@ -134,50 +134,50 @@ def parse_constellations_data() -> List[Dict]:
 
 # Main data processing
 async def process_data(parsed_data: List[Dict], location: Location):
-    async with global_state.processing_lock:
-        cst: List[Dict] = []
-        batch_index = 0
-        
-        try:
-            for obj in parsed_data:
-                cst_name = obj['name']
-                cst_nameUnicode = obj['nameUnicode']
-                cst_data = get_star_datas(obj['stars'], location)
-                cst_line = obj['lines']
-                
-                new_cst = {
-                    'name': cst_name,
-                    'nameUnicode': cst_nameUnicode,
-                    'stars': cst_data,
-                    'lines': cst_line
-                }
-                cst.append(new_cst)
-                print(f'{len(cst)}/88 Updated')
+    # async with global_state.processing_lock:
+    cst: List[Dict] = []
+    batch_index = 0
+    
+    try:
+        for obj in parsed_data:
+            cst_name = obj['name']
+            cst_nameUnicode = obj['nameUnicode']
+            cst_data = get_star_datas(obj['stars'], location)
+            cst_line = obj['lines']
+            
+            new_cst = {
+                'name': cst_name,
+                'nameUnicode': cst_nameUnicode,
+                'stars': cst_data,
+                'lines': cst_line
+            }
+            cst.append(new_cst)
+            print(f'{len(cst)}/88 Updated')
 
-                if len(cst) >= 15:
-                    server_data = {
-                        'location': location.model_dump(),
-                        'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        'constellations': cst
-                    }
-                    global_state.result[batch_index] = server_data
-                    cst = []
-                    batch_index += 1
-
-            # Process remaining constellations
-            if cst:
+            if len(cst) >= 15:
                 server_data = {
                     'location': location.model_dump(),
                     'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     'constellations': cst
                 }
                 global_state.result[batch_index] = server_data
+                cst = []
+                batch_index += 1
 
-            print('Complete!')
-            
-        except Exception as e:
-            print(f"Error processing data: {e}")
-            raise
+        # Process remaining constellations
+        if cst:
+            server_data = {
+                'location': location.model_dump(),
+                'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'constellations': cst
+            }
+            global_state.result[batch_index] = server_data
+
+        print('Complete!')
+        
+    except Exception as e:
+        print(f"Error processing data: {e}")
+        raise
 
 # FastAPI application setup
 app = FastAPI()
@@ -198,9 +198,8 @@ async def lifespan(app: FastAPI):
 
     async def update_data():
         try:
-            async with lock:
-                await process_data(parsed_data, global_state.location)
-                print("Data updated successfully!")
+            await process_data(parsed_data, global_state.location)
+            print("Data updated successfully!")
         except Exception as e:
             print(f"Error updating data: {e}")
 
@@ -237,7 +236,7 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     
     try:
-        async with lock:
+        async with global_state.processing_lock:
             # Handle initial location data
             data = await websocket.receive_text()
             print('Received data:', data)
@@ -247,8 +246,7 @@ async def websocket_endpoint(websocket: WebSocket):
             global_state.location = new_location
             print(f"Updated location: {global_state.location}")
 
-        #초기 데이터 전송
-        async with lock:
+            #초기 데이터 전송
             for item in global_state.result:
                 if item:
                     try:
@@ -261,7 +259,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
         # 메인 웹소켓 루프
         while True:
-            with lock:
+            async with global_state.processing_lock:
                 await asyncio.sleep(180)
                 for item in global_state.result:
                     if item:
