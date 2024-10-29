@@ -128,7 +128,7 @@ def get_star_datas(stars: List[str], location: Location) -> List[Dict]:
     return stars
 
 def parse_constellations_data() -> List[Dict]:
-    with open('constellation.json', 'r', encoding="UTF8") as f:
+    with open('test.json', 'r', encoding="UTF8") as f:
         data = json.load(f)
     return data
 
