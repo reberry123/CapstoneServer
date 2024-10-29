@@ -68,7 +68,9 @@ class GlobalState:
     def __init__(self):
         self.location = Location(lat=37.5665, lon=126.9780)
         self.result: List[Dict[str, Any]] = [{} for _ in range(6)]
-        self.processing_lock = asyncio.Lock()
+        self.data_index = 0
+        self.batch_index = 0
+        # self.processing_lock = asyncio.Lock()
 
 global_state = GlobalState()
 
@@ -125,7 +127,7 @@ def get_star_datas(stars: List[str], location: Location) -> List[Dict]:
         star_datas.append(star_data)
         i += 1
 
-    return stars
+    return star_datas
 
 def parse_constellations_data() -> List[Dict]:
     with open('test.json', 'r', encoding="UTF8") as f:
@@ -136,10 +138,10 @@ def parse_constellations_data() -> List[Dict]:
 async def process_data(parsed_data: List[Dict], location: Location):
     # async with global_state.processing_lock:
     cst: List[Dict] = []
-    batch_index = 0
     
     try:
-        for obj in parsed_data:
+        for i in range(global_state.index, len(parsed_data)):
+            obj = parsed_data[i]
             cst_name = obj['name']
             cst_nameUnicode = obj['nameUnicode']
             cst_data = get_star_datas(obj['stars'], location)
@@ -160,19 +162,14 @@ async def process_data(parsed_data: List[Dict], location: Location):
                     'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     'constellations': cst
                 }
-                global_state.result[batch_index] = server_data
-                cst = []
-                batch_index += 1
+                global_state.result[global_state.batch_index] = server_data
+                global_state.batch_index += 1
+                if global_state.batch_index >= len(global_state.result):
+                    global_state.batch_index = 0
 
-        # Process remaining constellations
-        if cst:
-            server_data = {
-                'location': location.model_dump(),
-                'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'constellations': cst
-            }
-            global_state.result[batch_index] = server_data
-
+        global_state.index += 15
+        if global_state.index >= len(parsed_data):
+            global_state.index = 0
         print('Complete!')
         
     except Exception as e:
@@ -236,17 +233,29 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     
     try:
-        async with global_state.processing_lock:
-            # Handle initial location data
-            data = await websocket.receive_text()
-            print('Received data:', data)
-            
-            location_data = json.loads(data)
-            new_location = Location(**location_data["location"])
-            global_state.location = new_location
-            print(f"Updated location: {global_state.location}")
+        # Handle initial location data
+        data = await websocket.receive_text()
+        print('Received data:', data)
+        
+        location_data = json.loads(data)
+        new_location = Location(**location_data["location"])
+        global_state.location = new_location
+        print(f"Updated location: {global_state.location}")
 
-            #초기 데이터 전송
+        #초기 데이터 전송
+        for item in global_state.result:
+            if item:
+                try:
+                    await websocket.send_text(json.dumps(item, ensure_ascii=False))
+                    print(f"Sent constellation batch with {len(item.get('constellations', []))} constellations")
+                except Exception as e:
+                    print(f"Error sending data: {e}")
+                    raise
+            await asyncio.sleep(1)
+
+        # 메인 웹소켓 루프
+        while True:
+            await asyncio.sleep(180)
             for item in global_state.result:
                 if item:
                     try:
@@ -256,20 +265,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         print(f"Error sending data: {e}")
                         raise
                 await asyncio.sleep(1)
-
-        # 메인 웹소켓 루프
-        while True:
-            async with global_state.processing_lock:
-                await asyncio.sleep(180)
-                for item in global_state.result:
-                    if item:
-                        try:
-                            await websocket.send_text(json.dumps(item, ensure_ascii=False))
-                            print(f"Sent constellation batch with {len(item.get('constellations', []))} constellations")
-                        except Exception as e:
-                            print(f"Error sending data: {e}")
-                            raise
-                    await asyncio.sleep(1)
 
     except WebSocketDisconnect:
         print('Client disconnected')
