@@ -14,12 +14,11 @@ import asyncio
 import json
 import time
 import warnings
-import threading
 import numpy as np
 
 # 경고 무시
 warnings.filterwarnings('ignore', message='ERFA function "pmsafe" yielded')
-lock = threading.Lock()
+lock = asyncio.Lock()
 Simbad.TIMEOUT = 120
 
 # 예시 데이터 2
@@ -199,7 +198,7 @@ async def lifespan(app: FastAPI):
 
     async def update_data():
         try:
-            with lock:
+            async with lock:
                 await process_data(parsed_data, global_state.location)
                 print("Data updated successfully!")
         except Exception as e:
@@ -238,17 +237,18 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     
     try:
-        # Handle initial location data
-        data = await websocket.receive_text()
-        print('Received data:', data)
-        
-        location_data = json.loads(data)
-        new_location = Location(**location_data["location"])
-        global_state.location = new_location
-        print(f"Updated location: {global_state.location}")
+        async with lock:
+            # Handle initial location data
+            data = await websocket.receive_text()
+            print('Received data:', data)
+            
+            location_data = json.loads(data)
+            new_location = Location(**location_data["location"])
+            global_state.location = new_location
+            print(f"Updated location: {global_state.location}")
 
         #초기 데이터 전송
-        with lock:
+        async with lock:
             for item in global_state.result:
                 if item:
                     try:
