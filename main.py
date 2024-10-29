@@ -12,11 +12,14 @@ from astropy.time import Time
 import astropy.units as u
 import asyncio
 import json
+import time
 import warnings
 import numpy as np
 
 # 경고 무시
 warnings.filterwarnings('ignore', message='ERFA function "pmsafe" yielded')
+
+Simbad.TIMEOUT = 120
 
 # 예시 데이터 2
 planets = [
@@ -73,11 +76,21 @@ global_state = GlobalState()
 def get_star_datas(stars: List[str], location: Location) -> List[Dict]:
     simbad = Simbad()
     simbad.add_votable_fields('flux(V)', 'pmra', 'pmdec', 'plx', 'rv_value')
-    result_table = simbad.query_objects(stars)
     obs_location = EarthLocation(lat=location.lat * u.deg, lon=location.lon * u.deg, height=0 * u.m)
     obs_time = Time.now()
     star_datas = []
+    retry = 5
+    wait = 60
     i = 0
+
+    for attempt in range(retry):
+        try:
+            result_table = simbad.query_objects(stars)
+            break
+        except TimeoutError:
+            print(f"Attempt {attempt + 1} failed. Retrying in {wait} seconds...")
+            time.sleep(wait)
+    
 
     for star_name, ra, dec, pm_ra_cosdec, pm_dec, parallax, radial_velocity, flux_v in zip(result_table['MAIN_ID'], result_table['RA'], result_table['DEC'], result_table['PMRA'], result_table['PMDEC'], result_table['PLX_VALUE'], result_table['RV_VALUE'], result_table['FLUX_V']):
 
