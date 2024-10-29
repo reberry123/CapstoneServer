@@ -140,7 +140,7 @@ async def process_data(parsed_data: List[Dict], location: Location):
     cst: List[Dict] = []
     
     try:
-        for i in range(global_state.index, len(parsed_data)):
+        for i in range(global_state.data_index, len(parsed_data)):
             obj = parsed_data[i]
             cst_name = obj['name']
             cst_nameUnicode = obj['nameUnicode']
