@@ -1,6 +1,10 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi_utils.tasks import repeat_every
+from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime
+from typing import List, Dict, Any, Optional
+from pydantic import BaseModel, Field
 from astroquery.simbad import Simbad
 from astroquery.jplhorizons import Horizons
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz
@@ -35,104 +39,232 @@ planets = [
     # -125544,  # International Space Station
 ]
 
-app = FastAPI()
+# Type definitions
+class Location(BaseModel):
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
 
-location = {
-    "lat": 37.5665,
-    "lon": 126.9780
-}
+class Star(BaseModel):
+    name: str
+    alt: float
+    az: float
+    fluxV: float
 
-result = [{},{},{},{},{},{}]
+class Constellation(BaseModel):
+    name: str
+    stars: List[Star]
+    lines: List[List[int]]
 
-async def process_data(parsed_data, location):
-    global result
-    cst = []
+class ServerData(BaseModel):
+    location: Location
+    time: str
+    constellations: List[Constellation]
+
+# Global state
+class GlobalState:
+    def __init__(self):
+        self.location = Location(lat=37.5665, lon=126.9780)
+        self.result: List[Dict[str, Any]] = [{} for _ in range(6)]
+        self.processing_lock = asyncio.Lock()
+
+global_state = GlobalState()
+
+# Utility functions
+def get_star_datas(stars: List[str], location: Location) -> List[Dict]:
+    simbad = Simbad()
+    simbad.add_votable_fields('flux(V)', 'pmra', 'pmdec', 'plx', 'rv_value')
+    result_table = simbad.query_objects(stars)
+    obs_location = EarthLocation(lat=location.lat * u.deg, lon=location.lon * u.deg, height=0 * u.m)
+    obs_time = Time.now()
+    star_datas = []
     i = 0
 
-    for obj in parsed_data:
-        cst_name = obj['name']
-        cst_data = get_star_datas(obj['stars'], location)
-        cst_line = obj['lines']
-        new_cst = {
-            'name': cst_name,
-            'stars': cst_data,
-            'lines': cst_line
+    for star_name, ra, dec, pm_ra_cosdec, pm_dec, parallax, radial_velocity, flux_v in zip(result_table['MAIN_ID'], result_table['RA'], result_table['DEC'], result_table['PMRA'], result_table['PMDEC'], result_table['PLX_VALUE'], result_table['RV_VALUE'], result_table['FLUX_V']):
+
+        # SkyCoord 객체로 변환
+        star_coord = SkyCoord(
+            ra=ra,
+            dec=dec,
+            unit=(u.hourangle, u.deg),
+            frame='icrs',
+            pm_ra_cosdec=pm_ra_cosdec * u.mas/u.yr,
+            pm_dec=pm_dec * u.mas/u.yr,
+            distance=1000/parallax * u.parsec,
+            radial_velocity=radial_velocity * u.km/u.s,
+            obstime=Time('2000-01-01T00:00:00')
+        )
+
+        star_now = star_coord.apply_space_motion(new_obstime=obs_time)
+        altaz_frame = AltAz(obstime=obs_time, location=obs_location)
+        star_altaz = star_now.transform_to(altaz_frame)
+        if np.ma.is_masked(flux_v):
+            flux_v = flux_v.filled(np.nan)
+
+        star_data = {
+            'id': star_name,
+            'ra': star_now.ra.degree,
+            'dec': star_now.dec.degree,
+            'alt': star_altaz.alt.degree,
+            'az': star_altaz.az.degree,
+            'flux_v': float(flux_v),
         }
-        cst.append(new_cst)
-        print(f'{len(cst)}/88 Updated')
 
-        if len(cst) >= 15:
-            server_data = {
-                'location': location,
-                'time': Time.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'constellations': cst
-            }
+        star_datas.append(star_data)
+        i += 1
 
-            result[i] = server_data
-            cst.clear()
-            i += 1
+    return stars
 
-    server_data = {
-        'location': location,
-        'time': Time.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'constellations': cst
-    }
+def parse_constellations_data() -> List[Dict]:
+    with open('constellation.json', 'r', encoding="UTF8") as f:
+        data = json.load(f)
+    return data
 
-    result[i] = server_data
-    print('Complete!')
-    await asyncio.sleep(30)
-    return server_data
+# Main data processing
+async def process_data(parsed_data: List[Dict], location: Location):
+    async with global_state.processing_lock:
+        cst: List[Dict] = []
+        batch_index = 0
+        
+        try:
+            for obj in parsed_data:
+                cst_name = obj['name']
+                cst_nameUnicode = obj['nameUnicode']
+                cst_data = get_star_datas(obj['stars'], location)
+                cst_line = obj['lines']
+                
+                new_cst = {
+                    'name': cst_name,
+                    'nameUnicode': cst_nameUnicode,
+                    'stars': cst_data,
+                    'lines': cst_line
+                }
+                cst.append(new_cst)
+                print(f'{len(cst)}/88 Updated')
+
+                if len(cst) >= 15:
+                    server_data = {
+                        'location': location.model_dump(),
+                        'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        'constellations': cst
+                    }
+                    global_state.result[batch_index] = server_data
+                    cst = []
+                    batch_index += 1
+
+            # Process remaining constellations
+            if cst:
+                server_data = {
+                    'location': location.model_dump(),
+                    'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'constellations': cst
+                }
+                global_state.result[batch_index] = server_data
+
+            print('Complete!')
+            
+        except Exception as e:
+            print(f"Error processing data: {e}")
+            raise
+
+# FastAPI application setup
+app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Adjust this in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup
     parsed_data = parse_constellations_data()
 
     async def update_data():
-        await process_data(parsed_data, location)
-        print("Updated!")
+        try:
+            await process_data(parsed_data, global_state.location)
+            print("Data updated successfully!")
+        except Exception as e:
+            print(f"Error updating data: {e}")
 
     task = asyncio.create_task(
-        repeat_every(seconds=30)(update_data)()
+        repeat_every(seconds=120)(update_data)()
     )
-
+    
     yield
-
+    
+    # Shutdown
     task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 app.router.lifespan_context = lifespan
 
-# WebSocket 엔드포인트
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+manager = ConnectionManager()
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    global location
-    await websocket.accept()
-
+    await manager.connect(websocket)
+    
     try:
+        # Handle initial location data
         data = await websocket.receive_text()
-        print('Received data: ', data)
-        new_location = json.loads(data)
-        location.update(new_location["location"])
-        print(location)
+        print('Received data:', data)
+        
+        location_data = json.loads(data)
+        new_location = Location(**location_data["location"])
+        global_state.location = new_location
+        print(f"Updated location: {global_state.location}")
 
+        for item in global_state.result:
+            if item:  # Only send non-empty results
+                try:
+                    await websocket.send_text(json.dumps(item, ensure_ascii=False))
+                    print(f"Sent constellation batch with {len(item.get('constellations', []))} constellations")
+                except Exception as e:
+                    print(f"Error sending data: {e}")
+                    raise
+            await asyncio.sleep(1)
+
+        # Main WebSocket loop
         while True:
-            print(len(result))
-            for item in result:
-                print(len(item["constellations"]))
-                await websocket.send_text(json.dumps(item, ensure_ascii=False))
-                await asyncio.sleep(30)
+            for item in global_state.result:
+                if item:  # Only send non-empty results
+                    try:
+                        await websocket.send_text(json.dumps(item, ensure_ascii=False))
+                        print(f"Sent constellation batch with {len(item.get('constellations', []))} constellations")
+                    except Exception as e:
+                        print(f"Error sending data: {e}")
+                        raise
+                await asyncio.sleep(1)
+            await asyncio.sleep(60)
 
     except WebSocketDisconnect:
-        print('Client Disconnected')
-
+        print('Client disconnected')
     except Exception as e:
-        print(f'Connection error: {e}')
-
+        print(f'WebSocket error: {e}')
     finally:
-        # WebSocket 연결 종료
+        manager.disconnect(websocket)
         await websocket.close()
 
 # 태양계 외부 천체 검색 (SIMBAD)
-def get_star_datas(star_names, obs_loc):
+def get_star_datas_test(star_names, obs_loc):
     simbad = Simbad()
     simbad.add_votable_fields('flux(V)', 'pmra', 'pmdec', 'plx', 'rv_value')
     result_table = simbad.query_objects(star_names)
@@ -258,12 +390,6 @@ def get_planet_data(planet_id, obs_loc):
     print(f'TARGET {target_name}')
     print(f'RA {ra}, DEC {dec}, ALT {alt}, AZ {az}')
     print(f'V {v}')
-
-# 별자리 데이터 파싱
-def parse_constellations_data():
-    with open('constellation.json', 'r', encoding="UTF8") as f:
-        data = json.load(f)
-    return data
 
 if __name__ == "__main__":
     import uvicorn
