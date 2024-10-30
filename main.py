@@ -215,6 +215,12 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
         await websocket.close()
 
+@app.get("/")
+async def read_root():
+    return {
+        "message": "cibal"
+    }
+
 @app.get("/api/constellations/{name}")
 async def get_constellations(name: str = None, lat: float = None, lon: float = None):
     constellation = search_constellation(name)
