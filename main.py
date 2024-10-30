@@ -217,7 +217,16 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.get("/")
 async def read_root():
-    return "/api/constellations/"
+    return {
+        "url": "/api/constellations",
+        "star": {
+            "ra": "적경 Right Ascension",
+            "dec": "적위 Declination",
+            "alt": "고도 Altitude",
+            "az": "방위각 Azimuth",
+            "flux_v": "겉보기 등급 Flux V"
+        }
+    }
 
 @app.get("/api/constellations/")
 async def get_constellations_by_name(name: Optional[str] = None, lat: float = None, lon: float = None):
@@ -247,9 +256,10 @@ def search_constellation(name: str):
     # print(global_state.result)
 
     for item in global_state.result:
-        for constellation in item["constellations"]:
-            if constellation['name'] == name:
-                return constellation
+        if "constellations" in item.keys():
+            for constellation in item["constellations"]:
+                if constellation['name'] == name:
+                    return constellation
 
 # Utility functions
 def get_star_datas(stars: List[str], location: Location) -> List[Dict]:
