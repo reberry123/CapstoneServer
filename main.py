@@ -70,69 +70,8 @@ class GlobalState:
         self.result: List[Dict[str, Any]] = [{} for _ in range(6)]
         self.data_index = 0
         self.batch_index = 0
-        # self.processing_lock = asyncio.Lock()
 
 global_state = GlobalState()
-
-# Utility functions
-def get_star_datas(stars: List[str], location: Location) -> List[Dict]:
-    simbad = Simbad()
-    simbad.add_votable_fields('flux(V)', 'pmra', 'pmdec', 'plx', 'rv_value')
-    obs_location = EarthLocation(lat=location.lat * u.deg, lon=location.lon * u.deg, height=0 * u.m)
-    obs_time = Time.now()
-    star_datas = []
-    retry = 5
-    wait = 60
-    i = 0
-
-    for attempt in range(retry):
-        try:
-            result_table = simbad.query_objects(stars)
-            break
-        except TimeoutError:
-            print(f"Attempt {attempt + 1} failed. Retrying in {wait} seconds...")
-            time.sleep(wait)
-    
-
-    for star_name, ra, dec, pm_ra_cosdec, pm_dec, parallax, radial_velocity, flux_v in zip(result_table['MAIN_ID'], result_table['RA'], result_table['DEC'], result_table['PMRA'], result_table['PMDEC'], result_table['PLX_VALUE'], result_table['RV_VALUE'], result_table['FLUX_V']):
-
-        # SkyCoord 객체로 변환
-        star_coord = SkyCoord(
-            ra=ra,
-            dec=dec,
-            unit=(u.hourangle, u.deg),
-            frame='icrs',
-            pm_ra_cosdec=pm_ra_cosdec * u.mas/u.yr,
-            pm_dec=pm_dec * u.mas/u.yr,
-            distance=1000/parallax * u.parsec,
-            radial_velocity=radial_velocity * u.km/u.s,
-            obstime=Time('2000-01-01T00:00:00')
-        )
-
-        star_now = star_coord.apply_space_motion(new_obstime=obs_time)
-        altaz_frame = AltAz(obstime=obs_time, location=obs_location)
-        star_altaz = star_now.transform_to(altaz_frame)
-        if np.ma.is_masked(flux_v):
-            flux_v = flux_v.filled(np.nan)
-
-        star_data = {
-            'id': star_name,
-            'ra': star_now.ra.degree,
-            'dec': star_now.dec.degree,
-            'alt': star_altaz.alt.degree,
-            'az': star_altaz.az.degree,
-            'flux_v': float(flux_v),
-        }
-
-        star_datas.append(star_data)
-        i += 1
-
-    return star_datas
-
-def parse_constellations_data() -> List[Dict]:
-    with open('test.json', 'r', encoding="UTF8") as f:
-        data = json.load(f)
-    return data
 
 # Main data processing
 async def process_data(parsed_data: List[Dict], location: Location):
@@ -154,6 +93,7 @@ async def process_data(parsed_data: List[Dict], location: Location):
                 'lines': cst_line
             }
             cst.append(new_cst)
+            global_state.data_index += 1
             print(f'{global_state.batch_index * 15 + global_state.data_index}/88 Updated')
 
             if len(cst) >= 15:
@@ -169,7 +109,6 @@ async def process_data(parsed_data: List[Dict], location: Location):
 
                 break
 
-        global_state.data_index += 15
         if global_state.data_index >= len(parsed_data):
             global_state.data_index = 0
         print('Complete!')
@@ -275,6 +214,87 @@ async def websocket_endpoint(websocket: WebSocket):
     finally:
         manager.disconnect(websocket)
         await websocket.close()
+
+@app.get("/api/constellations/{name}")
+async def get_constellations(name: str = None, lat: float = None, lon: float = None):
+    constellation = search_constellation(name)
+
+    return {
+        "name": constellation['name'],
+        "nameUnicode": constellation['nameUnicode'],
+        "ra": constellation['ra'],
+        "dec": constellation['dec'],
+        "alt": constellation['alt'],
+        "az": constellation['az'],
+        "flux_v": constellation['flux_v']
+    }
+
+
+def search_constellation(name: str):
+    for item in global_state.result:
+        for constellation in item:
+            if constellation['name'] == name:
+                return constellation
+
+# Utility functions
+def get_star_datas(stars: List[str], location: Location) -> List[Dict]:
+    simbad = Simbad()
+    simbad.add_votable_fields('flux(V)', 'pmra', 'pmdec', 'plx', 'rv_value')
+    obs_location = EarthLocation(lat=location.lat * u.deg, lon=location.lon * u.deg, height=0 * u.m)
+    obs_time = Time.now()
+    star_datas = []
+    retry = 5
+    wait = 60
+    i = 0
+
+    for attempt in range(retry):
+        try:
+            result_table = simbad.query_objects(stars)
+            break
+        except TimeoutError:
+            print(f"Attempt {attempt + 1} failed. Retrying in {wait} seconds...")
+            time.sleep(wait)
+    
+
+    for star_name, ra, dec, pm_ra_cosdec, pm_dec, parallax, radial_velocity, flux_v in zip(result_table['MAIN_ID'], result_table['RA'], result_table['DEC'], result_table['PMRA'], result_table['PMDEC'], result_table['PLX_VALUE'], result_table['RV_VALUE'], result_table['FLUX_V']):
+
+        # SkyCoord 객체로 변환
+        star_coord = SkyCoord(
+            ra=ra,
+            dec=dec,
+            unit=(u.hourangle, u.deg),
+            frame='icrs',
+            pm_ra_cosdec=pm_ra_cosdec * u.mas/u.yr,
+            pm_dec=pm_dec * u.mas/u.yr,
+            distance=1000/parallax * u.parsec,
+            radial_velocity=radial_velocity * u.km/u.s,
+            obstime=Time('2000-01-01T00:00:00')
+        )
+
+        star_now = star_coord.apply_space_motion(new_obstime=obs_time)
+        altaz_frame = AltAz(obstime=obs_time, location=obs_location)
+        star_altaz = star_now.transform_to(altaz_frame)
+        if np.ma.is_masked(flux_v):
+            flux_v = flux_v.filled(np.nan)
+
+        star_data = {
+            'id': star_name,
+            'ra': star_now.ra.degree,
+            'dec': star_now.dec.degree,
+            'alt': star_altaz.alt.degree,
+            'az': star_altaz.az.degree,
+            'flux_v': float(flux_v),
+        }
+
+        star_datas.append(star_data)
+        i += 1
+
+    return star_datas
+
+def parse_constellations_data() -> List[Dict]:
+    with open('test.json', 'r', encoding="UTF8") as f:
+        data = json.load(f)
+    return data
 
 # 태양계 외부 천체 검색 (SIMBAD)
 def get_star_datas_test(star_names, obs_loc):
