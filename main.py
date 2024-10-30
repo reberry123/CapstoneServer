@@ -217,28 +217,37 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.get("/")
 async def read_root():
-    return {
-        "message": "cibal"
-    }
+    return "/api/constellations/"
 
-@app.get("/api/constellations/{name}")
-async def get_constellations(name: str = None, lat: float = None, lon: float = None):
+@app.get("/api/constellations/")
+async def get_constellations_by_name(name: Optional[str] = None, lat: float = None, lon: float = None):
+    if not name:
+        constellations = search_constellations()
+        return constellations
+    
     constellation = search_constellation(name)
 
     return {
         "name": constellation['name'],
         "nameUnicode": constellation['nameUnicode'],
-        "ra": constellation['ra'],
-        "dec": constellation['dec'],
-        "alt": constellation['alt'],
-        "az": constellation['az'],
-        "flux_v": constellation['flux_v']
+        "stars": constellation['stars'],
+        "lines": constellation['lines']
     }
 
+def search_constellations():
+    result = []
+
+    for item in global_state.result:
+        if "constellations" in item.keys():
+            # print(item["constellations"])
+            result += item["constellations"]
+    return result
 
 def search_constellation(name: str):
+    # print(global_state.result)
+
     for item in global_state.result:
-        for constellation in item:
+        for constellation in item["constellations"]:
             if constellation['name'] == name:
                 return constellation
 
@@ -281,7 +290,7 @@ def get_star_datas(stars: List[str], location: Location) -> List[Dict]:
         altaz_frame = AltAz(obstime=obs_time, location=obs_location)
         star_altaz = star_now.transform_to(altaz_frame)
         if np.ma.is_masked(flux_v):
-            flux_v = flux_v.filled(np.nan)
+            flux_v = flux_v.filled(0)
 
         star_data = {
             'id': star_name,
