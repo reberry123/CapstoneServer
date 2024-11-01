@@ -66,18 +66,31 @@ class Constellation(BaseModel):
     stars: List[Star]
     lines: List[List[int]]
 
+class StellarObject(BaseModel):
+    name: str
+    id: int
+    ra: float
+    dec: float
+    alt: float
+    az: float
+    radius: float
+    magnitude: float
+    distance: float
+
 # Global state
 class GlobalState:
     def __init__(self):
         self.location = Location(lat=37.5665, lon=126.9780)
         self.time: str
         self.constellations: List[Constellation] = []
+        self.stellar_objs: List[StellarObject] = []
 
 global_state = GlobalState()
 
-def process_data(constellations: List[Dict]):
+def process_data(constellations: List[Dict], objects: List[StellarObject]):
     try:
         get_constellation_data(constellations)
+        global_state.stellar_objs = get_horizons_data(objects)
         print("Loaded constellations!")
     except Exception as e:
         print(f"Error processing data: {e}")
@@ -99,21 +112,27 @@ app.add_middleware(
 async def lifespan(app: FastAPI):
     # Startup
     constellations = parse_constellations_data()
-    process_data(constellations)
+    objects = parse_horizons_data()
+    process_data(constellations, objects)
+    
 
     async def update_data():
         try:
             async with lock:
-                i = 1
-                m = len(global_state.constellations)
-                for constellation in global_state.constellations:
-                    print(f"\r({int((i/m)*100)}%) Updating {constellation.name}          ", end="")
-                    for star in constellation.stars:
-                        calculate_altaz(star, global_state.location)
-                    i += 1
+                for obj in global_state.stellar_objs:
+                    print(f"Updating... {obj.name}")
+                    calculate_obj_altaz(obj, global_state.location)
                     await asyncio.sleep(1)
-                print("\r", end="")
-                print("Updated successfully!     ")
+
+                for constellation in global_state.constellations:
+                    print(f"Updating... {constellation.name}")
+                    for star in constellation.stars:
+                        calculate_star_altaz(star, global_state.location)
+                    await asyncio.sleep(1)
+
+                
+
+                print("Updated successfully!")
                 
         except Exception as e:
             print(f"Error updating data: {e}")
@@ -214,9 +233,7 @@ async def get_constellations_by_name(name: str):
 
 @app.get("/api/horizons/")
 async def get_horizons():
-    return {
-        "message": "umm"
-    }
+    return global_state.stellar_objs
 
 def search_constellation(name: str):
     for constellation in global_state.constellations:
@@ -225,8 +242,7 @@ def search_constellation(name: str):
     return None
 
 def get_constellation_data(constellations: List[Dict]):
-    for i in range(len(constellations)):
-        constellation = constellations[i]
+    for constellation in constellations:
         name = constellation['name']
         nameUnicode = constellation['nameUnicode']
         stars = get_star_data(constellation['stars'])
@@ -235,6 +251,24 @@ def get_constellation_data(constellations: List[Dict]):
         new_constellation = Constellation(name=name, nameUnicode=nameUnicode, stars=stars, lines=lines)
         
         global_state.constellations.append(new_constellation)
+
+def get_horizons_data(horizons: List[Dict]) -> List[StellarObject]:
+    stellar_list = []
+    obs_time = Time.now()
+    for item in horizons:
+        obj = Horizons(id=item["id"], location='500@399', epochs=obs_time.jd)
+        eph = obj.ephemerides()
+
+        name = item["name"]
+        ra = eph['RA'][0]
+        dec = eph['DEC'][0]
+        distance = eph['delta'][0]
+        radius = item['radius']
+        mag = eph['V'][0]
+
+        new_obj = StellarObject(name=name, id=item["id"], ra=ra, dec=dec, alt=0, az=0, radius=radius, magnitude=mag, distance=distance)
+        stellar_list.append(new_obj)
+    return stellar_list
 
 def get_star_data(stars: List[str]) -> List[Star]:
     simbad = Simbad()
@@ -260,7 +294,21 @@ def get_star_data(stars: List[str]) -> List[Star]:
 
     return star_list
 
-def calculate_altaz(star: Star, location: Location):
+def calculate_obj_altaz(obj: StellarObject, location: Location):
+    obs_location = {
+        'lon': location.lon * u.deg,
+        'lat': location.lat * u.deg,
+        'elevation': 0 * u.m
+    }
+    obs_time = Time.now()
+
+    stellar_obj = Horizons(id=obj.id, location=obs_location, epochs=obs_time.jd)
+    ephem = stellar_obj.ephemerides()
+
+    obj.alt = ephem['EL'][0]
+    obj.az = ephem['AZ'][0]
+
+def calculate_star_altaz(star: Star, location: Location):
     obs_location = EarthLocation(lat=location.lat * u.deg, lon=location.lon * u.deg, height=0 * u.m)
     obs_time = Time.now()
 
@@ -286,6 +334,11 @@ def calculate_altaz(star: Star, location: Location):
 
 def parse_constellations_data() -> List[Dict]:
     with open('constellation.json', 'r', encoding="UTF8") as f:
+        data = json.load(f)
+    return data
+
+def parse_horizons_data() -> List[Dict]:
+    with open('horizons.json', 'r', encoding="UTF8") as f:
         data = json.load(f)
     return data
 
@@ -317,3 +370,4 @@ def get_planet_data(planet_id, obs_loc):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+    # get_planet_data(10, (37.5665, 126.9780))

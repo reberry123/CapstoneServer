@@ -2,56 +2,61 @@
     {
         "name": "Sun",
         "type": "star",
+        "radius": 696340,
         "id": 10
     },
     {
         "name": "Mercury",
         "type": "planet",
+        "radius": 2440,
         "id": 199
     },
     {
         "name": "Venus",
         "type": "planet",
+        "radius": 6052,
         "id": 299
-    },
-    {
-        "name": "Earth",
-        "type": "planet",
-        "id": 399
     },
     {
         "name": "Mars",
         "type": "planet",
+        "radius": 3396.2,
         "id": 499
     },
     {
         "name": "Jupiter",
         "type": "planet",
+        "radius": 71492,
         "id": 599
     },
     {
         "name": "Saturn",
         "type": "planet",
+        "radius": 60268,
         "id": 699
     },
     {
         "name": "Uranus",
         "type": "planet",
+        "radius": 25559,
         "id": 799
     },
     {
         "name": "Neptune",
         "type": "planet",
+        "radius": 24764,
         "id": 899
     },
     {
         "name": "Pluto",
         "type": "planet",
+        "radius": 1188.3,
         "id": 999
     },
     {
         "name": "Moon",
         "type": "satellite",
+        "radius": 1737.4,
         "id": 301
     }
 ]
