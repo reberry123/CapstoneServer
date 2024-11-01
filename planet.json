@@ -1,0 +1,57 @@
+[
+    {
+        "name": "Sun",
+        "type": "star",
+        "id": 10
+    },
+    {
+        "name": "Mercury",
+        "type": "planet",
+        "id": 199
+    },
+    {
+        "name": "Venus",
+        "type": "planet",
+        "id": 299
+    },
+    {
+        "name": "Earth",
+        "type": "planet",
+        "id": 399
+    },
+    {
+        "name": "Mars",
+        "type": "planet",
+        "id": 499
+    },
+    {
+        "name": "Jupiter",
+        "type": "planet",
+        "id": 599
+    },
+    {
+        "name": "Saturn",
+        "type": "planet",
+        "id": 699
+    },
+    {
+        "name": "Uranus",
+        "type": "planet",
+        "id": 799
+    },
+    {
+        "name": "Neptune",
+        "type": "planet",
+        "id": 899
+    },
+    {
+        "name": "Pluto",
+        "type": "planet",
+        "id": 999
+    },
+    {
+        "name": "Moon",
+        "type": "satellite",
+        "id": 301
+    }
+]

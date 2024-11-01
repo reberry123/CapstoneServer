@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi_utils.tasks import repeat_every
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
@@ -13,6 +13,7 @@ import astropy.units as u
 import asyncio
 import json
 import time
+import copy
 import warnings
 import numpy as np
 
@@ -49,70 +50,35 @@ class Location(BaseModel):
 
 class Star(BaseModel):
     name: str
+    ra: str
+    dec: str
+    pm_ra_cosdec: float
+    pm_dec: float
+    parallax: float
+    radial_velocity: float
     alt: float
     az: float
-    fluxV: float
+    flux_v: float
 
 class Constellation(BaseModel):
     name: str
+    nameUnicode: str
     stars: List[Star]
     lines: List[List[int]]
-
-class ServerData(BaseModel):
-    location: Location
-    time: str
-    constellations: List[Constellation]
 
 # Global state
 class GlobalState:
     def __init__(self):
         self.location = Location(lat=37.5665, lon=126.9780)
-        self.result: List[Dict[str, Any]] = [{} for _ in range(6)]
-        self.data_index = 0
-        self.batch_index = 0
+        self.time: str
+        self.constellations: List[Constellation] = []
 
 global_state = GlobalState()
 
-# Main data processing
-async def process_data(parsed_data: List[Dict], location: Location):
-    # async with global_state.processing_lock:
-    cst: List[Dict] = []
-    
+def process_data(constellations: List[Dict]):
     try:
-        for i in range(global_state.data_index, len(parsed_data)):
-            obj = parsed_data[i]
-            cst_name = obj['name']
-            cst_nameUnicode = obj['nameUnicode']
-            cst_data = get_star_datas(obj['stars'], location)
-            cst_line = obj['lines']
-            
-            new_cst = {
-                'name': cst_name,
-                'nameUnicode': cst_nameUnicode,
-                'stars': cst_data,
-                'lines': cst_line
-            }
-            cst.append(new_cst)
-            global_state.data_index += 1
-            print(f'{global_state.batch_index * 15 + global_state.data_index}/88 Updated')
-
-            if len(cst) >= 15:
-                server_data = {
-                    'location': location.model_dump(),
-                    'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'constellations': cst
-                }
-                global_state.result[global_state.batch_index] = server_data
-                global_state.batch_index += 1
-                if global_state.batch_index >= len(global_state.result):
-                    global_state.batch_index = 0
-
-                break
-
-        if global_state.data_index >= len(parsed_data):
-            global_state.data_index = 0
-        print('Complete!')
-        
+        get_constellation_data(constellations)
+        print("Loaded constellations!")
     except Exception as e:
         print(f"Error processing data: {e}")
         raise
@@ -132,12 +98,23 @@ app.add_middleware(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    parsed_data = parse_constellations_data()
+    constellations = parse_constellations_data()
+    process_data(constellations)
 
     async def update_data():
         try:
-            await process_data(parsed_data, global_state.location)
-            print("Data updated successfully!")
+            async with lock:
+                i = 1
+                m = len(global_state.constellations)
+                for constellation in global_state.constellations:
+                    print(f"\r({int((i/m)*100)}%) Updating {constellation.name}          ", end="")
+                    for star in constellation.stars:
+                        calculate_altaz(star, global_state.location)
+                    i += 1
+                    await asyncio.sleep(1)
+                print("\r", end="")
+                print("Updated successfully!     ")
+                
         except Exception as e:
             print(f"Error updating data: {e}")
 
@@ -147,8 +124,8 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Shutdown
     task.cancel()
+
     try:
         await task
     except asyncio.CancelledError:
@@ -174,7 +151,6 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     
     try:
-        # Handle initial location data
         data = await websocket.receive_text()
         print('Received data:', data)
         
@@ -183,29 +159,25 @@ async def websocket_endpoint(websocket: WebSocket):
         global_state.location = new_location
         print(f"Updated location: {global_state.location}")
 
-        #초기 데이터 전송
-        for item in global_state.result:
-            if item:
-                try:
-                    await websocket.send_text(json.dumps(item, ensure_ascii=False))
-                    print(f"Sent constellation batch with {len(item.get('constellations', []))} constellations")
-                except Exception as e:
-                    print(f"Error sending data: {e}")
-                    raise
-            await asyncio.sleep(1)
-
-        # 메인 웹소켓 루프
         while True:
-            await asyncio.sleep(180)
-            for item in global_state.result:
-                if item:
+            send_list = []
+            for constellation in global_state.constellations:
+                send_list.append(constellation)
+                if len(send_list) >= 15:
                     try:
-                        await websocket.send_text(json.dumps(item, ensure_ascii=False))
-                        print(f"Sent constellation batch with {len(item.get('constellations', []))} constellations")
+                        await websocket.send_text(json.dumps(send_list, ensure_ascii=False))
+                        print(f"Sent constellation batch with {len(send_list)} constellations")
+                        send_list = []
                     except Exception as e:
                         print(f"Error sending data: {e}")
                         raise
                 await asyncio.sleep(1)
+            try:
+                await websocket.send_text(json.dumps(send_list, ensure_ascii=False))
+                print(f"Sent constellation batch with {len(send_list)} constellations")
+            except Exception as e:
+                print(f"Error sending data: {e}")
+                raise
 
     except WebSocketDisconnect:
         print('Client disconnected')
@@ -228,49 +200,48 @@ async def read_root():
         }
     }
 
-@app.get("/api/constellations/")
-async def get_constellations_by_name(name: Optional[str] = None, lat: float = None, lon: float = None):
-    if not name:
-        constellations = search_constellations()
-        return constellations
-    
-    constellation = search_constellation(name)
+@app.get("/api/constellations")
+async def get_constellations():
+    return global_state.constellations
 
+@app.get("/api/constellations/{name}")
+async def get_constellations_by_name(name: str):
+    for constellation in global_state.constellations:
+        if constellation.name == name:
+            return constellation
+    
+    return HTTPException(status_code=404, detail="Constellation not found")
+
+@app.get("/api/horizons/")
+async def get_horizons():
     return {
-        "name": constellation['name'],
-        "nameUnicode": constellation['nameUnicode'],
-        "stars": constellation['stars'],
-        "lines": constellation['lines']
+        "message": "umm"
     }
 
-def search_constellations():
-    result = []
-
-    for item in global_state.result:
-        if "constellations" in item.keys():
-            # print(item["constellations"])
-            result += item["constellations"]
-    return result
-
 def search_constellation(name: str):
-    # print(global_state.result)
+    for constellation in global_state.constellations:
+        if constellation.name == name:
+            return constellation
+    return None
 
-    for item in global_state.result:
-        if "constellations" in item.keys():
-            for constellation in item["constellations"]:
-                if constellation['name'] == name:
-                    return constellation
+def get_constellation_data(constellations: List[Dict]):
+    for i in range(len(constellations)):
+        constellation = constellations[i]
+        name = constellation['name']
+        nameUnicode = constellation['nameUnicode']
+        stars = get_star_data(constellation['stars'])
+        lines =constellation['lines']
+        
+        new_constellation = Constellation(name=name, nameUnicode=nameUnicode, stars=stars, lines=lines)
+        
+        global_state.constellations.append(new_constellation)
 
-# Utility functions
-def get_star_datas(stars: List[str], location: Location) -> List[Dict]:
+def get_star_data(stars: List[str]) -> List[Star]:
     simbad = Simbad()
     simbad.add_votable_fields('flux(V)', 'pmra', 'pmdec', 'plx', 'rv_value')
-    obs_location = EarthLocation(lat=location.lat * u.deg, lon=location.lon * u.deg, height=0 * u.m)
-    obs_time = Time.now()
-    star_datas = []
+    star_list = []
     retry = 5
     wait = 60
-    i = 0
 
     for attempt in range(retry):
         try:
@@ -279,150 +250,44 @@ def get_star_datas(stars: List[str], location: Location) -> List[Dict]:
         except TimeoutError:
             print(f"Attempt {attempt + 1} failed. Retrying in {wait} seconds...")
             time.sleep(wait)
-    
 
     for star_name, ra, dec, pm_ra_cosdec, pm_dec, parallax, radial_velocity, flux_v in zip(result_table['MAIN_ID'], result_table['RA'], result_table['DEC'], result_table['PMRA'], result_table['PMDEC'], result_table['PLX_VALUE'], result_table['RV_VALUE'], result_table['FLUX_V']):
-
-        # SkyCoord 객체로 변환
-        star_coord = SkyCoord(
-            ra=ra,
-            dec=dec,
-            unit=(u.hourangle, u.deg),
-            frame='icrs',
-            pm_ra_cosdec=pm_ra_cosdec * u.mas/u.yr,
-            pm_dec=pm_dec * u.mas/u.yr,
-            distance=1000/parallax * u.parsec,
-            radial_velocity=radial_velocity * u.km/u.s,
-            obstime=Time('2000-01-01T00:00:00')
-        )
-
-        star_now = star_coord.apply_space_motion(new_obstime=obs_time)
-        altaz_frame = AltAz(obstime=obs_time, location=obs_location)
-        star_altaz = star_now.transform_to(altaz_frame)
         if np.ma.is_masked(flux_v):
             flux_v = flux_v.filled(0)
 
-        star_data = {
-            'id': star_name,
-            'ra': star_now.ra.degree,
-            'dec': star_now.dec.degree,
-            'alt': star_altaz.alt.degree,
-            'az': star_altaz.az.degree,
-            'flux_v': float(flux_v),
-        }
+        new_star = Star(name=star_name, ra=ra, dec=dec, pm_ra_cosdec=pm_ra_cosdec, pm_dec=pm_dec, parallax=parallax, radial_velocity=radial_velocity, alt=0, az=0, flux_v = flux_v)
+        star_list.append(new_star)
 
-        star_datas.append(star_data)
-        i += 1
+    return star_list
 
-    return star_datas
-
-def parse_constellations_data() -> List[Dict]:
-    with open('test.json', 'r', encoding="UTF8") as f:
-        data = json.load(f)
-    return data
-
-# 태양계 외부 천체 검색 (SIMBAD)
-def get_star_datas_test(star_names, obs_loc):
-    simbad = Simbad()
-    simbad.add_votable_fields('flux(V)', 'pmra', 'pmdec', 'plx', 'rv_value')
-    result_table = simbad.query_objects(star_names)
-    obs_location = EarthLocation(lat=obs_loc["lat"] * u.deg, lon=obs_loc["lon"] * u.deg, height=0 * u.m)
+def calculate_altaz(star: Star, location: Location):
+    obs_location = EarthLocation(lat=location.lat * u.deg, lon=location.lon * u.deg, height=0 * u.m)
     obs_time = Time.now()
-    star_datas = []
-    i = 0
 
-    for star_name, ra, dec, pm_ra_cosdec, pm_dec, parallax, radial_velocity, flux_v in zip(result_table['MAIN_ID'], result_table['RA'], result_table['DEC'], result_table['PMRA'], result_table['PMDEC'], result_table['PLX_VALUE'], result_table['RV_VALUE'], result_table['FLUX_V']):
-
-        # SkyCoord 객체로 변환
-        star_coord = SkyCoord(
-            ra=ra,
-            dec=dec,
-            unit=(u.hourangle, u.deg),
-            frame='icrs',
-            pm_ra_cosdec=pm_ra_cosdec * u.mas/u.yr,
-            pm_dec=pm_dec * u.mas/u.yr,
-            distance=1000/parallax * u.parsec,
-            radial_velocity=radial_velocity * u.km/u.s,
-            obstime=Time('2000-01-01T00:00:00')
-        )
-
-        star_now = star_coord.apply_space_motion(new_obstime=obs_time)
-        altaz_frame = AltAz(obstime=obs_time, location=obs_location)
-        star_altaz = star_now.transform_to(altaz_frame)
-        if np.ma.is_masked(flux_v):
-            flux_v = flux_v.filled(np.nan)
-
-        star_data = {
-            'id': star_name,
-            'ra': star_now.ra.degree,
-            'dec': star_now.dec.degree,
-            'alt': star_altaz.alt.degree,
-            'az': star_altaz.az.degree,
-            'flux_v': float(flux_v),
-        }
-
-        star_datas.append(star_data)
-        i += 1
-
-    return star_datas
-
-# 태양계 외부 단일 천체 검색 (SIMBAD) --- 테스트용
-def get_star_data(star_name):
-    # 별의 위치 정보와 고유 운동 데이터 가져오기
-    simbad = Simbad()
-    simbad.add_votable_fields('pmra', 'pmdec', 'plx', 'rv_value')
-    result_table = simbad.query_object("Betelgeuse")
-
-    # 정보 추출
-    name = result_table['NAME'][0]
-    ra = result_table['RA'][0]
-    dec = result_table['DEC'][0]
-    pm_ra_cosdec = result_table['PMRA'][0]
-    pm_dec = result_table['PMDEC'][0]
-    parallax = result_table['PLX_VALUE'][0]
-    radial_velocity = result_table['RV_VALUE'][0]
-
-    # SkyCoord 객체로 변환
     star_coord = SkyCoord(
-        ra=ra,
-        dec=dec,
+        ra=star.ra,
+        dec=star.dec,
         unit=(u.hourangle, u.deg),
         frame='icrs',
-        pm_ra_cosdec=pm_ra_cosdec * u.mas/u.yr,
-        pm_dec=pm_dec * u.mas/u.yr,
-        distance=1000/parallax * u.parsec,
-        radial_velocity=radial_velocity * u.km/u.s,
+        pm_ra_cosdec=star.pm_ra_cosdec * u.mas/u.yr,
+        pm_dec=star.pm_dec * u.mas/u.yr,
+        distance=1000/star.parallax * u.parsec,
+        radial_velocity=star.radial_velocity * u.km/u.s,
         obstime=Time('2000-01-01T00:00:00')
     )
 
-    # 관측 위치 설정
-    obs_location = EarthLocation(lat=37.5665 * u.deg, lon=126.9780 * u.deg, height=0 * u.m)
-
-    # 관측 시간 설정
-    obs_time = Time("2024-10-05T15:00:00")
-
-    # 고유 운동을 반영하여 위치 계산
     star_now = star_coord.apply_space_motion(new_obstime=obs_time)
-
-    # 지평 좌표계로 변환
     altaz_frame = AltAz(obstime=obs_time, location=obs_location)
     star_altaz = star_now.transform_to(altaz_frame)
 
-    # 결과 출력
-    print(f"관측 위치: (위도: {obs_location.lat:.2f}, 경도: {obs_location.lon:.2f})")
-    print(f"관측 시간: {obs_time.iso} UTC")
-    print(f"적경 (RA): {star_now.ra:.6f}")
-    print(f"적위 (Dec): {star_now.dec:.6f}")
-    print(f"고도: {star_altaz.alt:.2f}")
-    print(f"방위각: {star_altaz.az:.2f}")
+    global_state.time = obs_time
+    star.alt = star_altaz.alt.degree
+    star.az = star_altaz.az.degree
 
-    star_data = {
-        'name': star_name,
-        'ra': star_now.ra,
-        'dec': star_now.dec,
-        'alt': star_altaz.alt,
-        'az': star_altaz.az,
-    }
+def parse_constellations_data() -> List[Dict]:
+    with open('constellation.json', 'r', encoding="UTF8") as f:
+        data = json.load(f)
+    return data
 
 # 태양계 내부 천체 검색 (JPL HORIZONS) --- 테스트용
 def get_planet_data(planet_id, obs_loc):
