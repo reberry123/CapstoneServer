@@ -1,60 +1,60 @@
 [
     {
-        "name": "Sun",
+        "name": "sun",
         "type": "star",
         "radius": 696340,
         "id": 10
     },
     {
-        "name": "Mercury",
+        "name": "mercury",
         "type": "planet",
         "radius": 2440,
         "id": 199
     },
     {
-        "name": "Venus",
+        "name": "venus",
         "type": "planet",
         "radius": 6052,
         "id": 299
     },
     {
-        "name": "Mars",
+        "name": "mars",
         "type": "planet",
         "radius": 3396.2,
         "id": 499
     },
     {
-        "name": "Jupiter",
+        "name": "jupiter",
         "type": "planet",
         "radius": 71492,
         "id": 599
     },
     {
-        "name": "Saturn",
+        "name": "saturn",
         "type": "planet",
         "radius": 60268,
         "id": 699
     },
     {
-        "name": "Uranus",
+        "name": "uranus",
         "type": "planet",
         "radius": 25559,
         "id": 799
     },
     {
-        "name": "Neptune",
+        "name": "neptune",
         "type": "planet",
         "radius": 24764,
         "id": 899
     },
     {
-        "name": "Pluto",
+        "name": "pluto",
         "type": "planet",
         "radius": 1188.3,
         "id": 999
     },
     {
-        "name": "Moon",
+        "name": "moon",
         "type": "satellite",
         "radius": 1737.4,
         "id": 301

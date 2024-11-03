@@ -2,8 +2,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi_utils.tasks import repeat_every
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime
-from typing import List, Dict, Any, Optional
+from fastapi.staticfiles import StaticFiles
+from typing import List, Dict
 from pydantic import BaseModel, Field
 from astroquery.simbad import Simbad
 from astroquery.jplhorizons import Horizons
@@ -50,6 +50,7 @@ class Location(BaseModel):
 
 class Star(BaseModel):
     name: str
+    type: str
     ra: str
     dec: str
     pm_ra_cosdec: float
@@ -63,12 +64,15 @@ class Star(BaseModel):
 class Constellation(BaseModel):
     name: str
     nameUnicode: str
+    type: str
     stars: List[Star]
     lines: List[List[int]]
 
 class StellarObject(BaseModel):
     name: str
     id: int
+    type: str
+    img: str
     ra: float
     dec: float
     alt: float
@@ -98,6 +102,7 @@ def process_data(constellations: List[Dict], objects: List[StellarObject]):
 
 # FastAPI application setup
 app = FastAPI()
+app.mount("/static", StaticFiles(directory="img"), name="static")
 
 # Add CORS middleware
 app.add_middleware(
@@ -179,21 +184,19 @@ async def websocket_endpoint(websocket: WebSocket):
             for obj in global_state.stellar_objs:
                 item.append({
                     "name": obj.name,
+                    "type": obj.type,
+                    "img": obj.img,
                     "ra": obj.ra,
                     "dec": obj.dec,
                     "alt": obj.alt,
                     "az": obj.az,
                     "radius": obj.radius,
-                    "magnitude": obj.magnitude,
-                    "distance": obj.distance
+                    "distance": obj.distance,
+                    "flux_v": obj.magnitude
                 })
-            send_data = {
-                "type": "solarbody",
-                "item": item
-            }
             try:
-                await websocket.send_text(json.dumps(send_data, ensure_ascii=False))
-                print(f"Sent constellation batch with {len(send_data)} stellar objects")
+                await websocket.send_text(json.dumps(item, ensure_ascii=False))
+                print(f"Sent constellation batch with {len(item)} stellar objects")
                 item = []
             except Exception as e:
                 print(f"Error sending data: {e}")
@@ -203,6 +206,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 item.append({
                     "name": constellation.name,
                     "nameUnicode": constellation.nameUnicode,
+                    "type": constellation.type,
                     "stars": [{
                         "name": star.name,
                         "alt": star.alt,
@@ -212,24 +216,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     "lines": [line for line in constellation.lines]
                 })
                 if len(item) >= 15:
-                    send_data = {
-                        "type": "constellation",
-                        "item": item
-                    }
                     try:
-                        await websocket.send_text(json.dumps(send_data, ensure_ascii=False))
-                        print(f"Sent constellation batch with {len(send_data)} constellations")
+                        await websocket.send_text(json.dumps(item, ensure_ascii=False))
+                        print(f"Sent constellation batch with {len(item)} constellations")
                         item = []
                     except Exception as e:
                         print(f"Error sending data: {e}")
                         raise
-            send_data = {
-                "type": "constellation",
-                "item": item
-            }
             try:
-                await websocket.send_text(json.dumps(send_data, ensure_ascii=False))
-                print(f"Sent constellation batch with {len(send_data)} constellations")
+                await websocket.send_text(json.dumps(item, ensure_ascii=False))
+                print(f"Sent constellation batch with {len(item)} constellations")
             except Exception as e:
                 print(f"Error sending data: {e}")
                 raise
@@ -247,31 +243,36 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.get("/")
 async def read_root():
     return {
-        "url": "/api/constellations",
+        "url": "/api/stellar",
         "star": {
             "ra": "적경 Right Ascension",
             "dec": "적위 Declination",
             "alt": "고도 Altitude",
             "az": "방위각 Azimuth",
-            "flux_v": "겉보기 등급 Flux V"
+            "radius": "적도 반지름(km)",
+            "flux_v": "가시등급 (겉보기등급)",
+            "distance": "지구와의 거리(AU)"
         }
     }
 
-@app.get("/api/constellations")
-async def get_constellations():
-    return global_state.constellations
+@app.get("/api/stellar")
+async def get_stellar_objects():
+    send_data = []
+    send_data.append(global_state.stellar_objs)
+    send_data.extend(global_state.constellations)
+    return send_data
 
-@app.get("/api/constellations/{name}")
-async def get_constellations_by_name(name: str):
+@app.get("/api/stellar/{name}")
+async def get_stellar_objects_by_name(name: str):
     for constellation in global_state.constellations:
-        if constellation.name == name:
+        if constellation.name == name or constellation.name == name.lower():
             return constellation
     
+    for obj in global_state.stellar_objs:
+        if obj.name == name or obj.name == name.lower():
+            return obj
+    
     return HTTPException(status_code=404, detail="Constellation not found")
-
-@app.get("/api/solarbody/")
-async def get_solarbody():
-    return global_state.stellar_objs
 
 def search_constellation(name: str):
     for constellation in global_state.constellations:
@@ -286,7 +287,7 @@ def get_constellation_data(constellations: List[Dict]):
         stars = get_star_data(constellation['stars'])
         lines =constellation['lines']
         
-        new_constellation = Constellation(name=name, nameUnicode=nameUnicode, stars=stars, lines=lines)
+        new_constellation = Constellation(name=name, nameUnicode=nameUnicode, type="constellation", stars=stars, lines=lines)
         
         global_state.constellations.append(new_constellation)
 
@@ -298,13 +299,14 @@ def get_horizons_data(horizons: List[Dict]) -> List[StellarObject]:
         eph = obj.ephemerides()
 
         name = item["name"]
+        img = f"https://port-0-capstoneserver-m2qhwewx334fe436.sel4.cloudtype.app/static/{name}.png"
         ra = eph['RA'][0]
         dec = eph['DEC'][0]
         distance = eph['delta'][0]
         radius = item['radius']
         mag = eph['V'][0]
 
-        new_obj = StellarObject(name=name, id=item["id"], ra=ra, dec=dec, alt=0, az=0, radius=radius, magnitude=mag, distance=distance)
+        new_obj = StellarObject(name=name, id=item["id"], type=item["type"], img=img, ra=ra, dec=dec, alt=0, az=0, radius=radius, magnitude=mag, distance=distance)
         stellar_list.append(new_obj)
     return stellar_list
 
@@ -327,7 +329,7 @@ def get_star_data(stars: List[str]) -> List[Star]:
         if np.ma.is_masked(flux_v):
             flux_v = flux_v.filled(0)
 
-        new_star = Star(name=star_name, ra=ra, dec=dec, pm_ra_cosdec=pm_ra_cosdec, pm_dec=pm_dec, parallax=parallax, radial_velocity=radial_velocity, alt=0, az=0, flux_v = flux_v)
+        new_star = Star(name=star_name, type="star", ra=ra, dec=dec, pm_ra_cosdec=pm_ra_cosdec, pm_dec=pm_dec, parallax=parallax, radial_velocity=radial_velocity, alt=0, az=0, flux_v = flux_v)
         star_list.append(new_star)
 
     return star_list
