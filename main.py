@@ -138,7 +138,7 @@ async def lifespan(app: FastAPI):
             print(f"Error updating data: {e}")
 
     task = asyncio.create_task(
-        repeat_every(seconds=120)(update_data)()
+        repeat_every(seconds=60)(update_data)()
     )
     
     yield
@@ -170,18 +170,47 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     
     try:
-        data = await websocket.receive_text()
-        print('Received data:', data)
+        # data = await websocket.receive_text()
+        # print('Received data:', data)
         
-        location_data = json.loads(data)
-        new_location = Location(**location_data["location"])
-        global_state.location = new_location
-        print(f"Updated location: {global_state.location}")
+        # location_data = json.loads(data)
+        # new_location = Location(**location_data["location"])
+        # global_state.location = new_location
+        # print(f"Updated location: {global_state.location}")
 
         while True:
             send_list = []
+            for obj in global_state.stellar_objs:
+                send_list.append({
+                    "name": obj.name,
+                    "ra": obj.ra,
+                    "dec": obj.dec,
+                    "alt": obj.alt,
+                    "az": obj.az,
+                    "radius": obj.radius,
+                    "magnitude": obj.magnitude,
+                    "distance": obj.distance
+                })
+            try:
+                await websocket.send_text(json.dumps(send_list, ensure_ascii=False))
+                print(f"Sent constellation batch with {len(send_list)} stellar objects")
+                send_list = []
+            except Exception as e:
+                print(f"Error sending data: {e}")
+                raise
+
             for constellation in global_state.constellations:
-                send_list.append(constellation)
+                send_list.append({
+                    "name": constellation.name,
+                    "nameUnicode": constellation.nameUnicode,
+                    "stars": [{
+                        "name": star.name,
+                        "alt": star.alt,
+                        "az": star.az,
+                        "flux_v": star.flux_v
+                    } for star in constellation.stars],
+                    "lines": [line for line in constellation.lines]
+                })
                 if len(send_list) >= 15:
                     try:
                         await websocket.send_text(json.dumps(send_list, ensure_ascii=False))
@@ -190,13 +219,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     except Exception as e:
                         print(f"Error sending data: {e}")
                         raise
-                await asyncio.sleep(1)
+                # await asyncio.sleep(1)
             try:
                 await websocket.send_text(json.dumps(send_list, ensure_ascii=False))
                 print(f"Sent constellation batch with {len(send_list)} constellations")
             except Exception as e:
                 print(f"Error sending data: {e}")
                 raise
+
+            await asyncio.sleep(60)
 
     except WebSocketDisconnect:
         print('Client disconnected')
