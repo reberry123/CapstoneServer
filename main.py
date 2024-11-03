@@ -115,7 +115,6 @@ async def lifespan(app: FastAPI):
     objects = parse_horizons_data()
     process_data(constellations, objects)
     
-
     async def update_data():
         try:
             async with lock:
@@ -130,10 +129,7 @@ async def lifespan(app: FastAPI):
                         calculate_star_altaz(star, global_state.location)
                     await asyncio.sleep(1)
 
-                
-
                 print("Updated successfully!")
-                
         except Exception as e:
             print(f"Error updating data: {e}")
 
@@ -179,9 +175,9 @@ async def websocket_endpoint(websocket: WebSocket):
         # print(f"Updated location: {global_state.location}")
 
         while True:
-            send_list = []
+            item = []
             for obj in global_state.stellar_objs:
-                send_list.append({
+                item.append({
                     "name": obj.name,
                     "ra": obj.ra,
                     "dec": obj.dec,
@@ -191,16 +187,20 @@ async def websocket_endpoint(websocket: WebSocket):
                     "magnitude": obj.magnitude,
                     "distance": obj.distance
                 })
+            send_data = {
+                "type": "solarbody",
+                "item": item
+            }
             try:
-                await websocket.send_text(json.dumps(send_list, ensure_ascii=False))
-                print(f"Sent constellation batch with {len(send_list)} stellar objects")
-                send_list = []
+                await websocket.send_text(json.dumps(send_data, ensure_ascii=False))
+                print(f"Sent constellation batch with {len(send_data)} stellar objects")
+                item = []
             except Exception as e:
                 print(f"Error sending data: {e}")
                 raise
 
             for constellation in global_state.constellations:
-                send_list.append({
+                item.append({
                     "name": constellation.name,
                     "nameUnicode": constellation.nameUnicode,
                     "stars": [{
@@ -211,18 +211,25 @@ async def websocket_endpoint(websocket: WebSocket):
                     } for star in constellation.stars],
                     "lines": [line for line in constellation.lines]
                 })
-                if len(send_list) >= 15:
+                if len(item) >= 15:
+                    send_data = {
+                        "type": "constellation",
+                        "item": item
+                    }
                     try:
-                        await websocket.send_text(json.dumps(send_list, ensure_ascii=False))
-                        print(f"Sent constellation batch with {len(send_list)} constellations")
-                        send_list = []
+                        await websocket.send_text(json.dumps(send_data, ensure_ascii=False))
+                        print(f"Sent constellation batch with {len(send_data)} constellations")
+                        item = []
                     except Exception as e:
                         print(f"Error sending data: {e}")
                         raise
-                # await asyncio.sleep(1)
+            send_data = {
+                "type": "constellation",
+                "item": item
+            }
             try:
-                await websocket.send_text(json.dumps(send_list, ensure_ascii=False))
-                print(f"Sent constellation batch with {len(send_list)} constellations")
+                await websocket.send_text(json.dumps(send_data, ensure_ascii=False))
+                print(f"Sent constellation batch with {len(send_data)} constellations")
             except Exception as e:
                 print(f"Error sending data: {e}")
                 raise
@@ -262,8 +269,8 @@ async def get_constellations_by_name(name: str):
     
     return HTTPException(status_code=404, detail="Constellation not found")
 
-@app.get("/api/horizons/")
-async def get_horizons():
+@app.get("/api/solarbody/")
+async def get_solarbody():
     return global_state.stellar_objs
 
 def search_constellation(name: str):
@@ -372,31 +379,6 @@ def parse_horizons_data() -> List[Dict]:
     with open('horizons.json', 'r', encoding="UTF8") as f:
         data = json.load(f)
     return data
-
-# 태양계 내부 천체 검색 (JPL HORIZONS) --- 테스트용
-def get_planet_data(planet_id, obs_loc):
-    obs_location = {'lon': obs_loc[1] * u.deg,  # 관측 위치 설정
-                     'lat': obs_loc[0] * u.deg,
-                     'elevation': 0 * u.m}
-    # obs_time = Time.now()                     # 관측 시간 설정
-    obs_time = Time("2024-10-08 9:00:00")
-
-    # 천체 검색
-    planet = Horizons(id=planet_id, location=obs_location, epochs=obs_time.jd)
-    planet_ephem = planet.ephemerides()
-
-    # 정보 추출
-    target_name = planet_ephem['targetname'][0]
-    ra = planet_ephem['RA'][0]      # 적경 [deg]
-    dec = planet_ephem['DEC'][0]    # 적위 [deg]
-    alt = planet_ephem['EL'][0]     # 고도 [deg]
-    az = planet_ephem['AZ'][0]      # 방위각 [deg]
-    v = planet_ephem['V'][0]        # 겉보기 등급
-
-    print(f'TIME {obs_time}')
-    print(f'TARGET {target_name}')
-    print(f'RA {ra}, DEC {dec}, ALT {alt}, AZ {az}')
-    print(f'V {v}')
 
 if __name__ == "__main__":
     import uvicorn
