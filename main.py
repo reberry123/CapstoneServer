@@ -307,7 +307,7 @@ def get_constellation_data(constellations: List[Dict]):
         ra = f"{ra_hms[0]} {ra_hms[1]} {ra_hms[2]:.2f}"
         dec = f"{dec_dms[0]} {dec_dms[1]} {dec_dms[2]:.2f}"
 
-        new_constellation = Constellation(name=name, nameUnicode=nameUnicode, type="constellation", ra=ra, dec=dec, alt=0, az=0, stars=stars, lines=lines)
+        new_constellation = Constellation(name=name.replace(" ", "").lower(), nameUnicode=nameUnicode, type="constellation", ra=ra, dec=dec, alt=0, az=0, stars=stars, lines=lines)
         global_state.constellations.append(new_constellation)
 
 def get_horizons_data(horizons: List[Dict]) -> List[StellarObject]:
