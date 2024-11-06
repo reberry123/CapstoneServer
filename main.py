@@ -287,7 +287,7 @@ async def get_stellar_objects_by_name(name: str):
             if star.name == name or star.name == name.lower():
                 return star
 
-    return HTTPException(status_code=404, detail="Object not found")
+    raise HTTPException(status_code=404, detail="Object not found")
 
 def search_constellation(name: str):
     for constellation in global_state.constellations:
