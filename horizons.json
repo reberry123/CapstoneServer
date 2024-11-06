@@ -1,60 +1,70 @@
 [
     {
         "name": "sun",
+        "nameUnicode": "태양",
         "type": "star",
         "radius": 696340,
         "id": 10
     },
     {
         "name": "mercury",
+        "nameUnicode": "수성",
         "type": "planet",
         "radius": 2440,
         "id": 199
     },
     {
         "name": "venus",
+        "nameUnicode": "금성",
         "type": "planet",
         "radius": 6052,
         "id": 299
     },
     {
         "name": "mars",
+        "nameUnicode": "화성",
         "type": "planet",
         "radius": 3396.2,
         "id": 499
     },
     {
         "name": "jupiter",
+        "nameUnicode": "목성",
         "type": "planet",
         "radius": 71492,
         "id": 599
     },
     {
         "name": "saturn",
+        "nameUnicode": "토성",
         "type": "planet",
         "radius": 60268,
         "id": 699
     },
     {
         "name": "uranus",
+        "nameUnicode": "천왕성",
         "type": "planet",
         "radius": 25559,
         "id": 799
     },
     {
         "name": "neptune",
+        "nameUnicode": "해왕성",
         "type": "planet",
         "radius": 24764,
         "id": 899
     },
     {
         "name": "pluto",
+        "nameUnicode": "명왕성",
         "type": "planet",
         "radius": 1188.3,
         "id": 999
     },
     {
         "name": "moon",
+        "nameUnicode": "달",
         "type": "satellite",
         "radius": 1737.4,
         "id": 301

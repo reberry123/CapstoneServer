@@ -13,7 +13,7 @@ import astropy.units as u
 import asyncio
 import json
 import time
-import copy
+import re
 import warnings
 import numpy as np
 
@@ -65,20 +65,25 @@ class Constellation(BaseModel):
     name: str
     nameUnicode: str
     type: str
+    ra: str
+    dec: str
+    alt: float
+    az: float
     stars: List[Star]
     lines: List[List[int]]
 
 class StellarObject(BaseModel):
     name: str
+    nameUnicode: str
     id: int
     type: str
     img: str
-    ra: float
-    dec: float
+    ra: str
+    dec: str
     alt: float
     az: float
     radius: float
-    magnitude: float
+    flux_v: float
     distance: float
 
 # Global state
@@ -130,8 +135,17 @@ async def lifespan(app: FastAPI):
 
                 for constellation in global_state.constellations:
                     print(f"Updating... {constellation.name}")
+                    alt_sum = 0
+                    az_sum = 0
                     for star in constellation.stars:
                         calculate_star_altaz(star, global_state.location)
+                        alt_sum += star.alt
+                        az_sum += star.az
+                    alt_center = alt_sum / len(constellation.stars)
+                    az_center = az_sum / len(constellation.stars)
+                    constellation.alt = alt_center
+                    constellation.az = az_center
+                    
                     await asyncio.sleep(1)
 
                 print("Updated successfully!")
@@ -185,14 +199,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 item.append({
                     "name": obj.name,
                     "type": obj.type,
-                    "img": obj.img,
-                    "ra": obj.ra,
-                    "dec": obj.dec,
                     "alt": obj.alt,
                     "az": obj.az,
-                    "radius": obj.radius,
-                    "distance": obj.distance,
-                    "flux_v": obj.magnitude
+                    "flux_v": obj.flux_v
                 })
             try:
                 await websocket.send_text(json.dumps(item, ensure_ascii=False))
@@ -205,8 +214,9 @@ async def websocket_endpoint(websocket: WebSocket):
             for constellation in global_state.constellations:
                 item.append({
                     "name": constellation.name,
-                    "nameUnicode": constellation.nameUnicode,
                     "type": constellation.type,
+                    "alt": constellation.alt,
+                    "az": constellation.az,
                     "stars": [{
                         "name": star.name,
                         "alt": star.alt,
@@ -243,8 +253,10 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.get("/")
 async def read_root():
     return {
+        "title": "Capstone Server API",
         "url": "/api/stellar",
-        "star": {
+        "url_by_name": "/api/stellar/{name}",
+        "object": {
             "ra": "적경 Right Ascension",
             "dec": "적위 Declination",
             "alt": "고도 Altitude",
@@ -264,15 +276,18 @@ async def get_stellar_objects():
 
 @app.get("/api/stellar/{name}")
 async def get_stellar_objects_by_name(name: str):
-    for constellation in global_state.constellations:
-        if constellation.name == name or constellation.name == name.lower():
-            return constellation
-    
     for obj in global_state.stellar_objs:
         if obj.name == name or obj.name == name.lower():
             return obj
-    
-    return HTTPException(status_code=404, detail="Constellation not found")
+        
+    for constellation in global_state.constellations:
+        if constellation.name == name or constellation.name == name.lower():
+            return constellation
+        for star in constellation.stars:
+            if star.name == name or star.name == name.lower():
+                return star
+
+    return HTTPException(status_code=404, detail="Object not found")
 
 def search_constellation(name: str):
     for constellation in global_state.constellations:
@@ -284,11 +299,15 @@ def get_constellation_data(constellations: List[Dict]):
     for constellation in constellations:
         name = constellation['name']
         nameUnicode = constellation['nameUnicode']
-        stars = get_star_data(constellation['stars'])
+        stars, center = get_star_data(constellation['stars'])
         lines =constellation['lines']
-        
-        new_constellation = Constellation(name=name, nameUnicode=nameUnicode, type="constellation", stars=stars, lines=lines)
-        
+
+        ra_hms = degrees_to_hms(center[0])
+        dec_dms = degrees_to_dms(center[1])
+        ra = f"{ra_hms[0]} {ra_hms[1]} {ra_hms[2]:.2f}"
+        dec = f"{dec_dms[0]} {dec_dms[1]} {dec_dms[2]:.2f}"
+
+        new_constellation = Constellation(name=name, nameUnicode=nameUnicode, type="constellation", ra=ra, dec=dec, alt=0, az=0, stars=stars, lines=lines)
         global_state.constellations.append(new_constellation)
 
 def get_horizons_data(horizons: List[Dict]) -> List[StellarObject]:
@@ -299,21 +318,27 @@ def get_horizons_data(horizons: List[Dict]) -> List[StellarObject]:
         eph = obj.ephemerides()
 
         name = item["name"]
+        nameUnicode = item["nameUnicode"]
         img = f"https://port-0-capstoneserver-m2qhwewx334fe436.sel4.cloudtype.app/static/{name}.png"
-        ra = eph['RA'][0]
-        dec = eph['DEC'][0]
+        ra_hms = degrees_to_hms(eph['RA'][0])
+        dec_dms = degrees_to_dms(eph['DEC'][0])
+        ra = f"{ra_hms[0]} {ra_hms[1]} {ra_hms[2]:.2f}"
+        dec = f"{dec_dms[0]} {dec_dms[1]} {dec_dms[2]:.2f}"
         distance = eph['delta'][0]
         radius = item['radius']
         mag = eph['V'][0]
 
-        new_obj = StellarObject(name=name, id=item["id"], type=item["type"], img=img, ra=ra, dec=dec, alt=0, az=0, radius=radius, magnitude=mag, distance=distance)
+        new_obj = StellarObject(name=name, nameUnicode=nameUnicode, id=item["id"], type=item["type"], img=img, ra=ra, dec=dec, alt=0, az=0, radius=radius, flux_v=mag, distance=distance)
         stellar_list.append(new_obj)
     return stellar_list
 
-def get_star_data(stars: List[str]) -> List[Star]:
+def get_star_data(stars: List[str]):
     simbad = Simbad()
-    simbad.add_votable_fields('flux(V)', 'pmra', 'pmdec', 'plx', 'rv_value')
+    simbad.add_votable_fields('ids', 'flux(V)', 'pmra', 'pmdec', 'plx', 'rv_value')
     star_list = []
+    coords = []
+    ra_center = 0
+    dec_center = 0
     retry = 5
     wait = 60
 
@@ -325,14 +350,26 @@ def get_star_data(stars: List[str]) -> List[Star]:
             print(f"Attempt {attempt + 1} failed. Retrying in {wait} seconds...")
             time.sleep(wait)
 
-    for star_name, ra, dec, pm_ra_cosdec, pm_dec, parallax, radial_velocity, flux_v in zip(result_table['MAIN_ID'], result_table['RA'], result_table['DEC'], result_table['PMRA'], result_table['PMDEC'], result_table['PLX_VALUE'], result_table['RV_VALUE'], result_table['FLUX_V']):
+    for star_name, ids, ra, dec, pm_ra_cosdec, pm_dec, parallax, radial_velocity, flux_v in zip(result_table['MAIN_ID'], result_table['IDS'], result_table['RA'], result_table['DEC'], result_table['PMRA'], result_table['PMDEC'], result_table['PLX_VALUE'], result_table['RV_VALUE'], result_table['FLUX_V']):
         if np.ma.is_masked(flux_v):
             flux_v = flux_v.filled(0)
+
+        for alias in ids.split('|'):
+            if alias.strip().startswith('NAME '):
+                star_name = alias.strip().replace("NAME ", "").lower()
+        coords.append((ra, dec))
 
         new_star = Star(name=star_name, type="star", ra=ra, dec=dec, pm_ra_cosdec=pm_ra_cosdec, pm_dec=pm_dec, parallax=parallax, radial_velocity=radial_velocity, alt=0, az=0, flux_v = flux_v)
         star_list.append(new_star)
 
-    return star_list
+    if len(coords) > 0:
+        ra_deg = [hms_to_degrees(coord[0]) for coord in coords]
+        dec_deg = [dms_to_degrees(coord[1]) for coord in coords]
+
+        ra_center = np.mean(ra_deg)
+        dec_center = np.mean(dec_deg)
+
+    return star_list, (ra_center, dec_center)
 
 def calculate_obj_altaz(obj: StellarObject, location: Location):
     obs_location = {
@@ -382,7 +419,27 @@ def parse_horizons_data() -> List[Dict]:
         data = json.load(f)
     return data
 
+def hms_to_degrees(ra):
+    h, m, s = map(float, ra.split())
+    return 15 * (h + m / 60 + s / 3600)
+
+def dms_to_degrees(dec):
+    d, m, s = map(float, dec.split())
+    sign = -1 if d < 0 else 1
+    return sign * (abs(d) + m / 60 + s / 3600)
+
+def degrees_to_hms(degrees):
+    h = int(degrees // 15)
+    m = int((degrees % 15) * 60 / 15)
+    s = (degrees % 15) * 60 % 15 * 60
+    return h, m, s
+
+def degrees_to_dms(degrees):
+    d = int(degrees)
+    m = int(abs(degrees - d) * 60)
+    s = abs(degrees - d - m / 60) * 3600
+    return d, m, s
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-    # get_planet_data(10, (37.5665, 126.9780))
