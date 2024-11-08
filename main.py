@@ -65,6 +65,7 @@ class Constellation(BaseModel):
     name: str
     nameUnicode: str
     type: str
+    img: str
     ra: str
     dec: str
     alt: float
@@ -299,6 +300,7 @@ def get_constellation_data(constellations: List[Dict]):
     for constellation in constellations:
         name = constellation['name']
         nameUnicode = constellation['nameUnicode']
+        img = constellation['img']
         stars, center = get_star_data(constellation['stars'])
         lines =constellation['lines']
 
@@ -307,7 +309,7 @@ def get_constellation_data(constellations: List[Dict]):
         ra = f"{ra_hms[0]} {ra_hms[1]} {ra_hms[2]:.2f}"
         dec = f"{dec_dms[0]} {dec_dms[1]} {dec_dms[2]:.2f}"
 
-        new_constellation = Constellation(name=name.replace(" ", "").lower(), nameUnicode=nameUnicode, type="constellation", ra=ra, dec=dec, alt=0, az=0, stars=stars, lines=lines)
+        new_constellation = Constellation(name=name.replace(" ", "").lower(), nameUnicode=nameUnicode, type="constellation", img=img, ra=ra, dec=dec, alt=0, az=0, stars=stars, lines=lines)
         global_state.constellations.append(new_constellation)
 
 def get_horizons_data(horizons: List[Dict]) -> List[StellarObject]:
