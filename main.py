@@ -60,6 +60,7 @@ class Star(BaseModel):
     alt: float
     az: float
     flux_v: float
+    distance: float
 
 class Constellation(BaseModel):
     name: str
@@ -70,6 +71,7 @@ class Constellation(BaseModel):
     dec: str
     alt: float
     az: float
+    distance: float
     stars: List[Star]
     lines: List[List[int]]
 
@@ -202,7 +204,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     "type": obj.type,
                     "alt": obj.alt,
                     "az": obj.az,
-                    "flux_v": obj.flux_v
+                    "flux_v": obj.flux_v,
+                    "distance": obj.distance
                 })
             try:
                 await websocket.send_text(json.dumps(item, ensure_ascii=False))
@@ -218,11 +221,13 @@ async def websocket_endpoint(websocket: WebSocket):
                     "type": constellation.type,
                     "alt": constellation.alt,
                     "az": constellation.az,
+                    "distance": constellation.distance,
                     "stars": [{
                         "name": star.name,
                         "alt": star.alt,
                         "az": star.az,
-                        "flux_v": star.flux_v
+                        "flux_v": star.flux_v,
+                        "distance": star.distance
                     } for star in constellation.stars],
                     "lines": [line for line in constellation.lines]
                 })
@@ -301,7 +306,7 @@ def get_constellation_data(constellations: List[Dict]):
         name = constellation['name']
         nameUnicode = constellation['nameUnicode']
         img = constellation['img']
-        stars, center = get_star_data(constellation['stars'])
+        stars, center, distance = get_star_data(constellation['stars'])
         lines =constellation['lines']
 
         ra_hms = degrees_to_hms(center[0])
@@ -309,7 +314,7 @@ def get_constellation_data(constellations: List[Dict]):
         ra = f"{ra_hms[0]} {ra_hms[1]} {ra_hms[2]:.2f}"
         dec = f"{dec_dms[0]} {dec_dms[1]} {dec_dms[2]:.2f}"
 
-        new_constellation = Constellation(name=name.replace(" ", "").lower(), nameUnicode=nameUnicode, type="constellation", img=img, ra=ra, dec=dec, alt=0, az=0, stars=stars, lines=lines)
+        new_constellation = Constellation(name=name.replace(" ", "").lower(), nameUnicode=nameUnicode, type="constellation", img=img, ra=ra, dec=dec, alt=0, az=0, distance=distance, stars=stars, lines=lines)
         global_state.constellations.append(new_constellation)
 
 def get_horizons_data(horizons: List[Dict]) -> List[StellarObject]:
@@ -343,6 +348,7 @@ def get_star_data(stars: List[str]):
     dec_center = 0
     retry = 5
     wait = 60
+    distance_mean = 0
 
     for attempt in range(retry):
         try:
@@ -361,7 +367,10 @@ def get_star_data(stars: List[str]):
                 star_name = alias.strip().replace("NAME ", "").lower()
         coords.append((ra, dec))
 
-        new_star = Star(name=star_name, type="star", ra=ra, dec=dec, pm_ra_cosdec=pm_ra_cosdec, pm_dec=pm_dec, parallax=parallax, radial_velocity=radial_velocity, alt=0, az=0, flux_v = flux_v)
+        distance = calc_distance(parallax)
+        distance_mean += distance
+
+        new_star = Star(name=star_name, type="star", ra=ra, dec=dec, pm_ra_cosdec=pm_ra_cosdec, pm_dec=pm_dec, parallax=parallax, radial_velocity=radial_velocity, alt=0, az=0, flux_v = flux_v, distance=distance)
         star_list.append(new_star)
 
     if len(coords) > 0:
@@ -370,8 +379,9 @@ def get_star_data(stars: List[str]):
 
         ra_center = np.mean(ra_deg)
         dec_center = np.mean(dec_deg)
+    distance_mean = distance_mean / len(star_list)
 
-    return star_list, (ra_center, dec_center)
+    return star_list, (ra_center, dec_center), distance_mean
 
 def calculate_obj_altaz(obj: StellarObject, location: Location):
     obs_location = {
@@ -420,6 +430,11 @@ def parse_horizons_data() -> List[Dict]:
     with open('horizons.json', 'r', encoding="UTF8") as f:
         data = json.load(f)
     return data
+
+def calc_distance(parallax: float) -> float:
+    distance_pc = 1000 / parallax
+
+    return distance_pc
 
 def hms_to_degrees(ra):
     h, m, s = map(float, ra.split())
