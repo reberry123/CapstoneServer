@@ -9,11 +9,11 @@ from astroquery.simbad import Simbad
 from astroquery.jplhorizons import Horizons
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from astropy.time import Time
+from datetime import datetime, timedelta
 import astropy.units as u
 import asyncio
 import json
 import time
-import re
 import warnings
 import numpy as np
 
@@ -21,27 +21,6 @@ import numpy as np
 warnings.filterwarnings('ignore', message='ERFA function "pmsafe" yielded')
 lock = asyncio.Lock()
 Simbad.TIMEOUT = 120
-
-# 예시 데이터 2
-planets = [
-    10,     # Sun
-    199,    # Mercury
-    299,    # Venus
-    # 399,  # Earth
-    499,    # Mars
-    599,    # Jupiter
-    699,    # Saturn
-    799,    # Uranus
-    899,    # Neptune
-    999,    # Pluto
-
-    # 301,  # Moon
-    # 1,    # Ceres
-    # 2,    # Pallas
-    # 4,    # Vesta
-    # 1P,   # Halley's Comet
-    # -125544,  # International Space Station
-]
 
 # Type definitions
 class Location(BaseModel):
@@ -96,6 +75,7 @@ class GlobalState:
         self.time: str
         self.constellations: List[Constellation] = []
         self.stellar_objs: List[StellarObject] = []
+        self.sun_positions: List[Dict] = []
 
 global_state = GlobalState()
 
@@ -127,6 +107,7 @@ async def lifespan(app: FastAPI):
     constellations = parse_constellations_data()
     objects = parse_horizons_data()
     process_data(constellations, objects)
+    get_sun_data()
     
     async def update_data():
         try:
@@ -188,13 +169,7 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     
     try:
-        # data = await websocket.receive_text()
-        # print('Received data:', data)
-        
-        # location_data = json.loads(data)
-        # new_location = Location(**location_data["location"])
-        # global_state.location = new_location
-        # print(f"Updated location: {global_state.location}")
+        await websocket.send_text(json.dumps(global_state.sun_positions, ensure_ascii=False))
 
         while True:
             item = []
@@ -294,6 +269,32 @@ async def get_stellar_objects_by_name(name: str):
                 return star
 
     raise HTTPException(status_code=404, detail="Object not found")
+
+def get_sun_data(step='1h'):
+    start_date = datetime.now().strftime('%Y-%m-%d')
+    end_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+    location = {
+        'lon': global_state.location.lon * u.deg,
+        'lat': global_state.location.lat * u.deg,
+        'elevation': 0 * u.m
+    }
+
+    observer = Horizons(id='10', location=location, epochs={
+        'start': start_date,
+        "stop": end_date,
+        'step': step
+    })
+
+    result = observer.ephemerides()
+
+    sun_positions = [
+        {
+            "alt": float(row['EL']),
+            "az": float(row['AZ']),
+        } for row in result
+    ]
+
+    global_state.sun_positions = sun_positions
 
 def search_constellation(name: str):
     for constellation in global_state.constellations:
